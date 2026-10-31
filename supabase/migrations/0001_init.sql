@@ -223,15 +223,15 @@ alter table message_log enable row level security;
 -- Drop existing policies if re-running
 drop policy if exists teachers_read on teachers;
 drop policy if exists teachers_write on teachers;
-
 create policy teachers_read on teachers for select
   using (id = auth.uid() or is_admin());
-
 create policy teachers_write on teachers for all
   using (is_admin())
   with check (is_admin());
 
 -- Groups policies
+drop policy if exists groups_read on groups;
+drop policy if exists groups_write on groups;
 create policy groups_read on groups for select
   using (teacher_id = auth.uid());
 create policy groups_write on groups for all
@@ -239,6 +239,8 @@ create policy groups_write on groups for all
   with check (teacher_id = auth.uid() and is_teacher_active(auth.uid()));
 
 -- Group sessions (child of groups)
+drop policy if exists gs_read on group_sessions;
+drop policy if exists gs_write on group_sessions;
 create policy gs_read on group_sessions for select
   using (exists (select 1 from groups g where g.id = group_id and g.teacher_id = auth.uid()));
 create policy gs_write on group_sessions for all
@@ -246,6 +248,8 @@ create policy gs_write on group_sessions for all
   with check (exists (select 1 from groups g where g.id = group_id and g.teacher_id = auth.uid()) and is_teacher_active(auth.uid()));
 
 -- Students policies
+drop policy if exists students_read on students;
+drop policy if exists students_write on students;
 create policy students_read on students for select
   using (teacher_id = auth.uid());
 create policy students_write on students for all
@@ -253,6 +257,8 @@ create policy students_write on students for all
   with check (teacher_id = auth.uid() and is_teacher_active(auth.uid()));
 
 -- Session occurrences policies
+drop policy if exists so_read on session_occurrences;
+drop policy if exists so_write on session_occurrences;
 create policy so_read on session_occurrences for select
   using (teacher_id = auth.uid());
 create policy so_write on session_occurrences for all
@@ -260,6 +266,8 @@ create policy so_write on session_occurrences for all
   with check (teacher_id = auth.uid() and is_teacher_active(auth.uid()));
 
 -- Attendance policies
+drop policy if exists att_read on attendance;
+drop policy if exists att_write on attendance;
 create policy att_read on attendance for select
   using (teacher_id = auth.uid());
 create policy att_write on attendance for all
@@ -267,6 +275,8 @@ create policy att_write on attendance for all
   with check (teacher_id = auth.uid() and is_teacher_active(auth.uid()));
 
 -- Make-up requests policies
+drop policy if exists mr_read on makeup_requests;
+drop policy if exists mr_write on makeup_requests;
 create policy mr_read on makeup_requests for select
   using (teacher_id = auth.uid());
 create policy mr_write on makeup_requests for all
@@ -274,6 +284,8 @@ create policy mr_write on makeup_requests for all
   with check (teacher_id = auth.uid() and is_teacher_active(auth.uid()));
 
 -- Questions policies
+drop policy if exists q_read on questions;
+drop policy if exists q_write on questions;
 create policy q_read on questions for select
   using (teacher_id = auth.uid());
 create policy q_write on questions for all
@@ -281,6 +293,8 @@ create policy q_write on questions for all
   with check (teacher_id = auth.uid() and is_teacher_active(auth.uid()));
 
 -- Exams policies
+drop policy if exists ex_read on exams;
+drop policy if exists ex_write on exams;
 create policy ex_read on exams for select
   using (teacher_id = auth.uid());
 create policy ex_write on exams for all
@@ -288,6 +302,8 @@ create policy ex_write on exams for all
   with check (teacher_id = auth.uid() and is_teacher_active(auth.uid()));
 
 -- Exam questions policies
+drop policy if exists eq_read on exam_questions;
+drop policy if exists eq_write on exam_questions;
 create policy eq_read on exam_questions for select
   using (exists (select 1 from exams e where e.id = exam_id and e.teacher_id = auth.uid()));
 create policy eq_write on exam_questions for all
@@ -295,6 +311,8 @@ create policy eq_write on exam_questions for all
   with check (exists (select 1 from exams e where e.id = exam_id and e.teacher_id = auth.uid()) and is_teacher_active(auth.uid()));
 
 -- Submissions policies
+drop policy if exists sub_read on submissions;
+drop policy if exists sub_write on submissions;
 create policy sub_read on submissions for select
   using (teacher_id = auth.uid());
 create policy sub_write on submissions for all
@@ -302,6 +320,8 @@ create policy sub_write on submissions for all
   with check (teacher_id = auth.uid() and is_teacher_active(auth.uid()));
 
 -- Answers policies
+drop policy if exists ans_read on answers;
+drop policy if exists ans_write on answers;
 create policy ans_read on answers for select
   using (exists (select 1 from submissions s where s.id = submission_id and s.teacher_id = auth.uid()));
 create policy ans_write on answers for all
@@ -309,6 +329,8 @@ create policy ans_write on answers for all
   with check (exists (select 1 from submissions s where s.id = submission_id and s.teacher_id = auth.uid()) and is_teacher_active(auth.uid()));
 
 -- Message log policies
+drop policy if exists ml_read on message_log;
+drop policy if exists ml_write on message_log;
 create policy ml_read on message_log for select
   using (teacher_id = auth.uid());
 create policy ml_write on message_log for all
