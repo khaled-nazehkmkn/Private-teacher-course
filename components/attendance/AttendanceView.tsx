@@ -15,6 +15,8 @@ import {
   Calendar,
 } from 'lucide-react'
 import { Modal } from '@/components/ui/modal'
+import { DatePicker } from '@/components/ui/date-picker'
+import { TimePicker } from '@/components/ui/time-picker'
 import { formatArabicDate } from '@/lib/occurrences'
 import type { TeacherStatus } from '@/lib/teacher-status'
 import type { GroupItem } from '../groups/GroupsView'
@@ -427,35 +429,26 @@ export function AttendanceView({
       >
         <form onSubmit={handleCreateOccurrence} className="space-y-4">
           <div>
-            <label className="mb-1 block text-xs font-bold text-slate-700">تاريخ الحصة</label>
-            <input
-              type="date"
-              required
+            <DatePicker
+              label="تاريخ الحصة"
               value={newDate}
-              onChange={(e) => setNewDate(e.target.value)}
-              className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-xs font-bold text-slate-800 outline-hidden focus:border-[#1d5ca8] focus:bg-white"
+              onChange={setNewDate}
             />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="mb-1 block text-xs font-bold text-slate-700">وقت البدء</label>
-              <input
-                type="time"
-                required
+              <TimePicker
+                label="وقت البدء"
                 value={newStartTime}
-                onChange={(e) => setNewStartTime(e.target.value)}
-                className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-xs font-bold text-slate-800 outline-hidden focus:border-[#1d5ca8] focus:bg-white"
+                onChange={setNewStartTime}
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-bold text-slate-700">وقت الانتهاء</label>
-              <input
-                type="time"
-                required
+              <TimePicker
+                label="وقت الانتهاء"
                 value={newEndTime}
-                onChange={(e) => setNewEndTime(e.target.value)}
-                className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-xs font-bold text-slate-800 outline-hidden focus:border-[#1d5ca8] focus:bg-white"
+                onChange={setNewEndTime}
               />
             </div>
           </div>

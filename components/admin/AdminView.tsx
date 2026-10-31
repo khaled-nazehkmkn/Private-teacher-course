@@ -14,6 +14,7 @@ import {
   CheckCircle2,
 } from 'lucide-react'
 import { Modal } from '@/components/ui/modal'
+import { DatePicker } from '@/components/ui/date-picker'
 
 export interface AdminTeacherItem {
   id: string
@@ -301,22 +302,19 @@ export function AdminView({ teachers, onRefreshTeachers }: Props) {
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="mb-1 block text-xs font-bold text-slate-700">تاريخ البداية (Active From)</label>
-              <input
-                type="date"
+              <DatePicker
+                label="تاريخ البداية (Active From)"
                 value={activeFrom}
-                onChange={(e) => setActiveFrom(e.target.value)}
-                className="w-full rounded-xl border border-slate-200 p-2 text-xs outline-hidden"
+                onChange={setActiveFrom}
               />
             </div>
 
             <div>
-              <label className="mb-1 block text-xs font-bold text-slate-700">تاريخ الانتهاء (Active To)</label>
-              <input
-                type="date"
+              <DatePicker
+                label="تاريخ الانتهاء (Active To)"
                 value={activeTo}
-                onChange={(e) => setActiveTo(e.target.value)}
-                className="w-full rounded-xl border border-slate-200 p-2 text-xs outline-hidden"
+                onChange={setActiveTo}
+                placeholder="غير محدد (مفتوح)"
               />
             </div>
           </div>

@@ -3,6 +3,7 @@
 import React, { useState } from 'react'
 import { Plus, Users, Calendar, Clock, Trash2, Edit2, AlertCircle, Loader2 } from 'lucide-react'
 import { Modal } from '@/components/ui/modal'
+import { TimePicker } from '@/components/ui/time-picker'
 import { ARABIC_WEEKDAYS } from '@/lib/occurrences'
 import type { TeacherStatus } from '@/lib/teacher-status'
 
@@ -239,7 +240,7 @@ export function GroupsView({ groups, onAddGroup, onDeleteGroup, teacherStatus }:
                       prev.map((s, i) => (i === idx ? { ...s, weekday: val } : s))
                     )
                   }}
-                  className="rounded-lg border border-slate-200 bg-white p-1.5 text-xs font-bold"
+                  className="rounded-xl border border-slate-200 bg-white p-2 text-xs font-bold shrink-0"
                 >
                   {ARABIC_WEEKDAYS.map((day, dIdx) => (
                     <option key={dIdx} value={dIdx}>
@@ -248,33 +249,29 @@ export function GroupsView({ groups, onAddGroup, onDeleteGroup, teacherStatus }:
                   ))}
                 </select>
 
-                <input
-                  type="time"
-                  required
-                  value={sess.start_time}
-                  onChange={(e) => {
-                    const val = e.target.value
-                    setSessions((prev) =>
-                      prev.map((s, i) => (i === idx ? { ...s, start_time: val } : s))
-                    )
-                  }}
-                  className="rounded-lg border border-slate-200 bg-white p-1.5 text-xs font-bold"
-                />
+                <div className="flex-1 min-w-[110px]">
+                  <TimePicker
+                    value={sess.start_time}
+                    onChange={(val) =>
+                      setSessions((prev) =>
+                        prev.map((s, i) => (i === idx ? { ...s, start_time: val } : s))
+                      )
+                    }
+                  />
+                </div>
 
-                <span className="text-xs text-slate-400">إلى</span>
+                <span className="text-xs font-bold text-slate-400 shrink-0">إلى</span>
 
-                <input
-                  type="time"
-                  required
-                  value={sess.end_time}
-                  onChange={(e) => {
-                    const val = e.target.value
-                    setSessions((prev) =>
-                      prev.map((s, i) => (i === idx ? { ...s, end_time: val } : s))
-                    )
-                  }}
-                  className="rounded-lg border border-slate-200 bg-white p-1.5 text-xs font-bold"
-                />
+                <div className="flex-1 min-w-[110px]">
+                  <TimePicker
+                    value={sess.end_time}
+                    onChange={(val) =>
+                      setSessions((prev) =>
+                        prev.map((s, i) => (i === idx ? { ...s, end_time: val } : s))
+                      )
+                    }
+                  />
+                </div>
 
                 {sessions.length > 1 && (
                   <button

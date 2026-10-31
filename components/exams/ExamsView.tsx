@@ -21,6 +21,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import { Modal } from '@/components/ui/modal'
+import { DateTimePicker } from '@/components/ui/datetime-picker'
 import { QRCodeModal } from '@/components/QRCodeModal'
 import { buildWhatsAppLink, formatExamResultMessage } from '@/lib/whatsapp'
 import type { TeacherStatus } from '@/lib/teacher-status'
@@ -391,30 +392,18 @@ export function ExamsView({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="mb-1 block text-xs font-bold text-slate-700">
-                موعد فتح الاختبار (اختياري)
-              </label>
-              <input
-                type="datetime-local"
-                value={opensAt}
-                onChange={(e) => setOpensAt(e.target.value)}
-                className="w-full rounded-xl border border-slate-200 p-2 text-xs outline-hidden"
-              />
-            </div>
+          <div className="space-y-3">
+            <DateTimePicker
+              label="موعد فتح الاختبار (اختياري)"
+              value={opensAt}
+              onChange={setOpensAt}
+            />
 
-            <div>
-              <label className="mb-1 block text-xs font-bold text-slate-700">
-                موعد إغلاق الاختبار (اختياري)
-              </label>
-              <input
-                type="datetime-local"
-                value={closesAt}
-                onChange={(e) => setClosesAt(e.target.value)}
-                className="w-full rounded-xl border border-slate-200 p-2 text-xs outline-hidden"
-              />
-            </div>
+            <DateTimePicker
+              label="موعد إغلاق الاختبار (اختياري)"
+              value={closesAt}
+              onChange={setClosesAt}
+            />
           </div>
 
           <div className="flex items-center gap-2 pt-1">
