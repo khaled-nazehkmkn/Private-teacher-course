@@ -11,7 +11,10 @@ import {
   Ban,
   Loader2,
   Users,
+  Plus,
+  Calendar,
 } from 'lucide-react'
+import { Modal } from '@/components/ui/modal'
 import { formatArabicDate } from '@/lib/occurrences'
 import type { TeacherStatus } from '@/lib/teacher-status'
 import type { GroupItem } from '../groups/GroupsView'
@@ -37,6 +40,12 @@ interface Props {
     records: Array<{ student_id: string; status: AttendanceStatus; note?: string }>
   ) => Promise<void>
   onToggleCancelOccurrence: (occurrenceId: string, currentStatus: 'held' | 'cancelled') => Promise<void>
+  onAddOccurrence?: (newOcc: {
+    group_id: string
+    session_date: string
+    start_time: string
+    end_time: string
+  }) => Promise<string | undefined>
   teacherStatus: TeacherStatus
 }
 
@@ -46,6 +55,7 @@ export function AttendanceView({
   occurrences,
   onSaveAttendance,
   onToggleCancelOccurrence,
+  onAddOccurrence,
   teacherStatus,
 }: Props) {
   const [selectedGroupId, setSelectedGroupId] = useState<string>(groups[0]?.id || '')
@@ -53,6 +63,13 @@ export function AttendanceView({
   const [attendanceMap, setAttendanceMap] = useState<Record<string, AttendanceStatus>>({})
   const [saving, setSaving] = useState(false)
   const [saveSuccess, setSaveSuccess] = useState(false)
+
+  // Add custom occurrence modal state
+  const [addModalOpen, setAddModalOpen] = useState(false)
+  const [newDate, setNewDate] = useState(() => new Date().toISOString().split('T')[0])
+  const [newStartTime, setNewStartTime] = useState('17:00')
+  const [newEndTime, setNewEndTime] = useState('18:30')
+  const [addingOccurrence, setAddingOccurrence] = useState(false)
 
   // Filter occurrences by group
   const groupOccurrences = occurrences.filter((o) => o.group_id === selectedGroupId)
@@ -118,6 +135,54 @@ export function AttendanceView({
       alert('حدث خطأ أثناء حفظ كشف الحضور')
     } finally {
       setSaving(false)
+    }
+  }
+
+  // Handle adding custom occurrence
+  const handleCreateOccurrence = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault()
+    if (!onAddOccurrence || !selectedGroupId) return
+
+    setAddingOccurrence(true)
+    try {
+      const newId = await onAddOccurrence({
+        group_id: selectedGroupId,
+        session_date: newDate,
+        start_time: newStartTime,
+        end_time: newEndTime,
+      })
+      if (newId) {
+        setSelectedOccurrenceId(newId)
+      }
+      setAddModalOpen(false)
+    } catch (err) {
+      console.error('Error adding session occurrence:', err)
+      alert('حدث خطأ أثناء إضافة موعد الحصة')
+    } finally {
+      setAddingOccurrence(false)
+    }
+  }
+
+  // Quick add today session
+  const handleQuickAddToday = async () => {
+    if (!onAddOccurrence || !selectedGroupId) return
+    const today = new Date().toISOString().split('T')[0]
+    setAddingOccurrence(true)
+    try {
+      const newId = await onAddOccurrence({
+        group_id: selectedGroupId,
+        session_date: today,
+        start_time: '17:00',
+        end_time: '18:30',
+      })
+      if (newId) {
+        setSelectedOccurrenceId(newId)
+      }
+    } catch (err) {
+      console.error('Error quick adding today occurrence:', err)
+      alert('حدث خطأ أثناء تسجيل حصة اليوم')
+    } finally {
+      setAddingOccurrence(false)
     }
   }
 
@@ -207,7 +272,20 @@ export function AttendanceView({
         </div>
 
         <div>
-          <label className="mb-1 block text-xs font-bold text-slate-700">تاريخ وموعد الحصة</label>
+          <div className="mb-1 flex items-center justify-between">
+            <label className="text-xs font-bold text-slate-700">تاريخ وموعد الحصة</label>
+            {onAddOccurrence && (
+              <button
+                type="button"
+                onClick={() => setAddModalOpen(true)}
+                disabled={!teacherStatus.isActive || !selectedGroupId}
+                className="inline-flex items-center gap-1 text-[11px] font-bold text-[#1d5ca8] hover:underline disabled:opacity-50"
+              >
+                <Plus className="size-3" />
+                <span>+ إضافة موعد مخصص</span>
+              </button>
+            )}
+          </div>
           <select
             value={selectedOccurrenceId}
             onChange={(e) => setSelectedOccurrenceId(e.target.value)}
@@ -215,14 +293,47 @@ export function AttendanceView({
           >
             {groupOccurrences.map((occ) => (
               <option key={occ.id} value={occ.id}>
-                {formatArabicDate(occ.session_date)} ({occ.start_time} - {occ.end_time})
+                {formatArabicDate(occ.session_date)} ({occ.start_time.slice(0, 5)} - {occ.end_time.slice(0, 5)})
                 {occ.status === 'cancelled' ? ' [ملغاة]' : ''}
               </option>
             ))}
-            {groupOccurrences.length === 0 && <option value="">لا توجد حصص مجدولة</option>}
+            {groupOccurrences.length === 0 && <option value="">لا توجد حصص مجدولة لهذه المجموعة</option>}
           </select>
         </div>
       </div>
+
+      {/* Empty State Help Banner if no occurrences */}
+      {groupOccurrences.length === 0 && (
+        <div className="rounded-2xl border border-dashed border-amber-300 bg-amber-50 p-4 text-center">
+          <p className="text-xs font-bold text-amber-900 mb-2">
+            لا توجد مواعيد حصص مجدولة لهذه المجموعة حالياً لتسجيل الحضور.
+          </p>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <button
+              type="button"
+              onClick={handleQuickAddToday}
+              disabled={addingOccurrence || !teacherStatus.isActive}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-[#1d5ca8] px-3.5 py-2 text-xs font-bold text-white shadow-xs hover:bg-[#164e93] disabled:opacity-50"
+            >
+              {addingOccurrence ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <CalendarDays className="size-3.5" />
+              )}
+              <span>+ تسجيل حصة بتاريخ اليوم الآن</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setAddModalOpen(true)}
+              disabled={addingOccurrence || !teacherStatus.isActive}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              <Plus className="size-3.5" />
+              <span>اختيار موعد مخصص</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Cancelled Alert Banner */}
       {currentOccurrence?.status === 'cancelled' && (
@@ -307,6 +418,67 @@ export function AttendanceView({
           </div>
         )}
       </div>
+
+      {/* Modal for adding custom session occurrence */}
+      <Modal
+        isOpen={addModalOpen}
+        onClose={() => setAddModalOpen(false)}
+        title="إضافة موعد حصة جديد للمجموعة"
+      >
+        <form onSubmit={handleCreateOccurrence} className="space-y-4">
+          <div>
+            <label className="mb-1 block text-xs font-bold text-slate-700">تاريخ الحصة</label>
+            <input
+              type="date"
+              required
+              value={newDate}
+              onChange={(e) => setNewDate(e.target.value)}
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-xs font-bold text-slate-800 outline-hidden focus:border-[#1d5ca8] focus:bg-white"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-700">وقت البدء</label>
+              <input
+                type="time"
+                required
+                value={newStartTime}
+                onChange={(e) => setNewStartTime(e.target.value)}
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-xs font-bold text-slate-800 outline-hidden focus:border-[#1d5ca8] focus:bg-white"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-700">وقت الانتهاء</label>
+              <input
+                type="time"
+                required
+                value={newEndTime}
+                onChange={(e) => setNewEndTime(e.target.value)}
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-xs font-bold text-slate-800 outline-hidden focus:border-[#1d5ca8] focus:bg-white"
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={() => setAddModalOpen(false)}
+              className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50"
+            >
+              إلغاء
+            </button>
+            <button
+              type="submit"
+              disabled={addingOccurrence}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-[#1d5ca8] px-4 py-2 text-xs font-bold text-white hover:bg-[#164e93] disabled:opacity-50"
+            >
+              {addingOccurrence && <Loader2 className="size-3.5 animate-spin" />}
+              <span>حفظ وتحديد الموعد</span>
+            </button>
+          </div>
+        </form>
+      </Modal>
     </div>
   )
 }

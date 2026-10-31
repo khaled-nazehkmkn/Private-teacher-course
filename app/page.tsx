@@ -210,10 +210,52 @@ export default function TeacherAppPage() {
         }
 
         // Fetch Occurrences
-        const { data: occData } = await supabase
+        let { data: occData } = await supabase
           .from('session_occurrences')
           .select('*')
           .order('session_date', { ascending: true })
+
+        // Auto-generate occurrences for groups with weekly sessions if none exist
+        if ((!occData || occData.length === 0) && groupsData && groupsData.length > 0) {
+          const toInsert: any[] = []
+          groupsData.forEach((grp: any) => {
+            const sessions = grp.sessions || []
+            if (sessions.length > 0) {
+              const occs = generateOccurrencesForWeeks({
+                weeklySessions: sessions.map((s: any) => ({
+                  weekday: s.weekday,
+                  start_time: s.start_time.slice(0, 5),
+                  end_time: s.end_time.slice(0, 5),
+                })),
+                weeksAhead: 4,
+                weeksBehind: 2,
+              })
+              occs.forEach((o) => {
+                toInsert.push({
+                  teacher_id: user.id,
+                  group_id: grp.id,
+                  session_date: o.session_date,
+                  start_time: o.start_time,
+                  end_time: o.end_time,
+                  status: 'held',
+                })
+              })
+            }
+          })
+
+          if (toInsert.length > 0) {
+            await supabase
+              .from('session_occurrences')
+              .upsert(toInsert, { onConflict: 'group_id,session_date,start_time' })
+
+            const { data: refreshedOcc } = await supabase
+              .from('session_occurrences')
+              .select('*')
+              .order('session_date', { ascending: true })
+
+            occData = refreshedOcc
+          }
+        }
 
         if (occData && occData.length > 0) {
           setOccurrences(occData as OccurrenceItem[])
@@ -307,33 +349,6 @@ export default function TeacherAppPage() {
     loadData()
   }, [loadData])
 
-  // Ensure occurrences are generated from weekly sessions if empty
-  useEffect(() => {
-    if (groups.length > 0 && occurrences.length === 0) {
-      const generatedList: OccurrenceItem[] = []
-      groups.forEach((grp) => {
-        if (grp.sessions && grp.sessions.length > 0) {
-          const occs = generateOccurrencesForWeeks({
-            weeklySessions: grp.sessions,
-            weeksAhead: 4,
-            weeksBehind: 2,
-          })
-          occs.forEach((o, i) => {
-            generatedList.push({
-              id: `occ-${grp.id}-${i}`,
-              group_id: grp.id,
-              session_date: o.session_date,
-              start_time: o.start_time,
-              end_time: o.end_time,
-              status: 'held',
-            })
-          })
-        }
-      })
-      setOccurrences(generatedList)
-    }
-  }, [groups, occurrences.length])
-
   // Handlers for Groups
   const handleAddGroup = async (newGroupData: Omit<GroupItem, 'id'>) => {
     const supabase = createClient()
@@ -363,6 +378,25 @@ export default function TeacherAppPage() {
               end_time: s.end_time,
             }))
           )
+
+          const occs = generateOccurrencesForWeeks({
+            weeklySessions: newGroupData.sessions,
+            weeksAhead: 4,
+            weeksBehind: 2,
+          })
+          if (occs.length > 0) {
+            await supabase.from('session_occurrences').upsert(
+              occs.map((o) => ({
+                teacher_id: user.id,
+                group_id: insertedGroup.id,
+                session_date: o.session_date,
+                start_time: o.start_time,
+                end_time: o.end_time,
+                status: 'held',
+              })),
+              { onConflict: 'group_id,session_date,start_time' }
+            )
+          }
         }
         await loadData()
         return
@@ -494,6 +528,58 @@ export default function TeacherAppPage() {
     setOccurrences((prev) =>
       prev.map((o) => (o.id === occurrenceId ? { ...o, status: nextStatus } : o))
     )
+  }
+
+  const handleAddOccurrence = async (newOcc: {
+    group_id: string
+    session_date: string
+    start_time: string
+    end_time: string
+  }): Promise<string | undefined> => {
+    const supabase = createClient()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (user) {
+      const { data, error } = await supabase
+        .from('session_occurrences')
+        .upsert(
+          {
+            teacher_id: user.id,
+            group_id: newOcc.group_id,
+            session_date: newOcc.session_date,
+            start_time: newOcc.start_time,
+            end_time: newOcc.end_time,
+            status: 'held',
+          },
+          { onConflict: 'group_id,session_date,start_time' }
+        )
+        .select()
+        .single()
+
+      if (!error && data) {
+        setOccurrences((prev) => {
+          const filtered = prev.filter((o) => o.id !== data.id)
+          return [...filtered, data as OccurrenceItem].sort((a, b) =>
+            a.session_date.localeCompare(b.session_date)
+          )
+        })
+        return data.id
+      }
+    }
+
+    const id = `occ-${Date.now()}`
+    const localItem: OccurrenceItem = {
+      id,
+      group_id: newOcc.group_id,
+      session_date: newOcc.session_date,
+      start_time: newOcc.start_time,
+      end_time: newOcc.end_time,
+      status: 'held',
+    }
+    setOccurrences((prev) => [...prev, localItem])
+    return id
   }
 
   // Questions Handlers
@@ -907,6 +993,7 @@ export default function TeacherAppPage() {
               occurrences={occurrences}
               onSaveAttendance={handleSaveAttendance}
               onToggleCancelOccurrence={handleToggleCancelOccurrence}
+              onAddOccurrence={handleAddOccurrence}
               teacherStatus={teacherStatus}
             />
           )}
