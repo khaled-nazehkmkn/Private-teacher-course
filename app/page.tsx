@@ -134,10 +134,7 @@ export default function TeacherAppPage() {
   const [groups, setGroups] = useState<GroupItem[]>(INITIAL_GROUPS)
   const [students, setStudents] = useState<StudentItem[]>(INITIAL_STUDENTS)
   const [occurrences, setOccurrences] = useState<OccurrenceItem[]>([])
-  const [absencesData, setAbsencesData] = useState<Record<string, AbsenceRecord>>({
-    'st-1': { student_id: 'st-1', dates: ['2026-10-25', '2026-10-27', '2026-10-29'], consecutive: 3 },
-    'st-3': { student_id: 'st-3', dates: ['2026-10-28'], consecutive: 1 },
-  })
+  const [absencesData, setAbsencesData] = useState<Record<string, AbsenceRecord>>({})
   const [makeupRequests, setMakeupRequests] = useState<MakeupRequestItem[]>([])
   const [questions, setQuestions] = useState<QuestionBankItem[]>(INITIAL_QUESTIONS)
   const [exams, setExams] = useState<ExamItem[]>([])
@@ -325,6 +322,35 @@ export default function TeacherAppPage() {
               created_at: m.created_at,
             }))
           )
+        }
+
+        // Fetch Absences from student_absences view
+        const { data: absData, error: absError } = await supabase
+          .from('student_absences')
+          .select('student_id, session_date, occurrence_id')
+          .order('session_date', { ascending: true })
+
+        if (absError) {
+          console.error('[App] Absences fetch error:', absError)
+        } else if (absData) {
+          const map: Record<string, AbsenceRecord> = {}
+          if (studentsData) {
+            studentsData.forEach((st: any) => {
+              map[st.id] = { student_id: st.id, dates: [], consecutive: 0 }
+            })
+          }
+          absData.forEach((row: any) => {
+            if (!map[row.student_id]) {
+              map[row.student_id] = { student_id: row.student_id, dates: [], consecutive: 0 }
+            }
+            if (!map[row.student_id].dates.includes(row.session_date)) {
+              map[row.student_id].dates.push(row.session_date)
+            }
+          })
+          Object.values(map).forEach((rec) => {
+            rec.consecutive = rec.dates.length
+          })
+          setAbsencesData(map)
         }
 
         // Fetch Admin Teachers if Admin
@@ -1001,6 +1027,7 @@ export default function TeacherAppPage() {
               groups={groups}
               students={students}
               occurrences={occurrences}
+              absencesData={absencesData}
               onSaveAttendance={handleSaveAttendance}
               onToggleCancelOccurrence={handleToggleCancelOccurrence}
               onAddOccurrence={handleAddOccurrence}

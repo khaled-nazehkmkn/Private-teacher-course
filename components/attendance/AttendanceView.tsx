@@ -26,6 +26,7 @@ import { TimePicker } from '@/components/ui/time-picker'
 import { formatArabicDate, ARABIC_WEEKDAYS } from '@/lib/occurrences'
 import { createClient } from '@/lib/supabase/browser'
 import type { TeacherStatus } from '@/lib/teacher-status'
+import type { AbsenceRecord } from '@/components/absence/AbsenceView'
 import type { GroupItem } from '../groups/GroupsView'
 import type { StudentItem } from '../students/StudentsView'
 
@@ -44,6 +45,7 @@ interface Props {
   groups: GroupItem[]
   students: StudentItem[]
   occurrences: OccurrenceItem[]
+  absencesData?: Record<string, AbsenceRecord>
   onSaveAttendance: (
     occurrenceId: string,
     records: Array<{ student_id: string; status: AttendanceStatus; note?: string }>
@@ -62,6 +64,7 @@ export function AttendanceView({
   groups,
   students,
   occurrences,
+  absencesData,
   onSaveAttendance,
   onToggleCancelOccurrence,
   onAddOccurrence,
@@ -276,6 +279,58 @@ export function AttendanceView({
       .filter((o) => o.group_id === selectedGroupId && o.session_date <= todayDateStr)
       .sort((a, b) => b.session_date.localeCompare(a.session_date))
   }, [occurrences, selectedGroupId, todayDateStr])
+
+  // Attendance stats for past history occurrences
+  const [historyStats, setHistoryStats] = useState<
+    Record<string, { present: number; absent: number; late: number; excused: number; total: number }>
+  >({})
+
+  useEffect(() => {
+    let isMounted = true
+    async function loadHistoryStats() {
+      if (historyOccurrences.length === 0) return
+      try {
+        const supabase = createClient()
+        const occIds = historyOccurrences.map((o) => o.id)
+        const { data, error } = await supabase
+          .from('attendance')
+          .select('occurrence_id, status')
+          .in('occurrence_id', occIds)
+
+        if (!isMounted || !data) return
+
+        const stats: Record<
+          string,
+          { present: number; absent: number; late: number; excused: number; total: number }
+        > = {}
+
+        occIds.forEach((id) => {
+          stats[id] = { present: 0, absent: 0, late: 0, excused: 0, total: 0 }
+        })
+
+        data.forEach((row: any) => {
+          if (!stats[row.occurrence_id]) {
+            stats[row.occurrence_id] = { present: 0, absent: 0, late: 0, excused: 0, total: 0 }
+          }
+          const s = stats[row.occurrence_id]
+          s.total += 1
+          if (row.status === 'present') s.present += 1
+          else if (row.status === 'absent') s.absent += 1
+          else if (row.status === 'late') s.late += 1
+          else if (row.status === 'excused') s.excused += 1
+        })
+
+        setHistoryStats(stats)
+      } catch (err) {
+        console.error('Error loading history stats:', err)
+      }
+    }
+
+    loadHistoryStats()
+    return () => {
+      isMounted = false
+    }
+  }, [historyOccurrences, saveSuccess])
 
   return (
     <div className="space-y-4 sm:space-y-6">
@@ -611,7 +666,24 @@ export function AttendanceView({
                       {sIndex + 1}
                     </span>
                     <div>
-                      <h4 className="text-xs font-bold text-slate-800">{st.full_name}</h4>
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-xs font-bold text-slate-800">{st.full_name}</h4>
+                        {(() => {
+                          const absCount = absencesData?.[st.id]?.dates?.length || 0
+                          if (absCount > 0) {
+                            return (
+                              <span className="inline-flex items-center rounded-md border border-rose-200 bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-700">
+                                🚨 غياب سابق: {absCount} حصة
+                              </span>
+                            )
+                          }
+                          return (
+                            <span className="inline-flex items-center rounded-md bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700">
+                              منتظم
+                            </span>
+                          )
+                        })()}
+                      </div>
                       <p className="text-[11px] text-slate-400">
                         كود: <span className="font-mono text-slate-600">{st.access_code}</span> ·
                         هاتف: {st.parent_phone}
@@ -683,6 +755,9 @@ export function AttendanceView({
           <div className="space-y-2.5">
             {historyOccurrences.map((occ) => {
               const isToday = occ.session_date === todayDateStr
+              const stat = historyStats[occ.id]
+              const hasRecords = stat && stat.total > 0
+
               return (
                 <div
                   key={occ.id}
@@ -711,12 +786,43 @@ export function AttendanceView({
                       <p className="text-xs text-slate-500">
                         التوقيت: من {occ.start_time.slice(0, 5)} إلى {occ.end_time.slice(0, 5)}
                       </p>
+
+                      {/* Attendance Breakdown Pills */}
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] font-bold">
+                        {hasRecords ? (
+                          <>
+                            <span className="rounded-md bg-emerald-50 px-2 py-0.5 text-emerald-700">
+                              حاضر: {stat.present}
+                            </span>
+                            {stat.absent > 0 && (
+                              <span className="rounded-md bg-rose-50 px-2 py-0.5 text-rose-700">
+                                غائب: {stat.absent}
+                              </span>
+                            )}
+                            {stat.late > 0 && (
+                              <span className="rounded-md bg-amber-50 px-2 py-0.5 text-amber-700">
+                                متأخر: {stat.late}
+                              </span>
+                            )}
+                            {stat.excused > 0 && (
+                              <span className="rounded-md bg-blue-50 px-2 py-0.5 text-blue-700">
+                                معذور: {stat.excused}
+                              </span>
+                            )}
+                          </>
+                        ) : (
+                          <span className="rounded-md bg-slate-100 px-2 py-0.5 text-slate-500">
+                            لم يتم رصد الحضور بعد
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
 
                   <button
                     type="button"
                     onClick={() => {
+                      setSelectedGroupId(occ.group_id)
                       setSelectedOccurrenceId(occ.id)
                       setActiveTab('sheet')
                     }}
