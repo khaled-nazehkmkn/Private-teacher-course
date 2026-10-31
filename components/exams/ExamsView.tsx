@@ -309,7 +309,7 @@ export function ExamsView({
                   className="inline-flex items-center gap-1.5 text-xs font-bold text-[#1d5ca8] hover:underline"
                 >
                   <BarChart3 className="size-4" />
-                  <span>النتائج والتحليل</span>
+                  <span>سجل الطلاب والنتائج (History)</span>
                 </button>
 
                 <div className="flex items-center gap-2">

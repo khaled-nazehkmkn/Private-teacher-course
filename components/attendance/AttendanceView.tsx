@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import {
   CalendarDays,
   CheckCircle2,
@@ -13,11 +13,18 @@ import {
   Users,
   Plus,
   Calendar,
+  History,
+  Play,
+  ArrowRight,
+  Check,
+  AlertCircle,
+  Edit3,
 } from 'lucide-react'
 import { Modal } from '@/components/ui/modal'
 import { DatePicker } from '@/components/ui/date-picker'
 import { TimePicker } from '@/components/ui/time-picker'
-import { formatArabicDate } from '@/lib/occurrences'
+import { formatArabicDate, ARABIC_WEEKDAYS } from '@/lib/occurrences'
+import { createClient } from '@/lib/supabase/browser'
 import type { TeacherStatus } from '@/lib/teacher-status'
 import type { GroupItem } from '../groups/GroupsView'
 import type { StudentItem } from '../students/StudentsView'
@@ -60,45 +67,155 @@ export function AttendanceView({
   onAddOccurrence,
   teacherStatus,
 }: Props) {
+  // Navigation View: 'today' (حصص اليوم) | 'sheet' (شيت رصد الحصة) | 'history' (سجل الحصص السابقة)
+  const [activeTab, setActiveTab] = useState<'today' | 'history' | 'sheet'>('today')
+
   const [selectedGroupId, setSelectedGroupId] = useState<string>(groups[0]?.id || '')
   const [selectedOccurrenceId, setSelectedOccurrenceId] = useState<string>('')
   const [attendanceMap, setAttendanceMap] = useState<Record<string, AttendanceStatus>>({})
+  const [loadingExistingAttendance, setLoadingExistingAttendance] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveSuccess, setSaveSuccess] = useState(false)
 
-  // Add custom occurrence modal state
-  const [addModalOpen, setAddModalOpen] = useState(false)
-  const [newDate, setNewDate] = useState(() => new Date().toISOString().split('T')[0])
-  const [newStartTime, setNewStartTime] = useState('17:00')
-  const [newEndTime, setNewEndTime] = useState('18:30')
-  const [addingOccurrence, setAddingOccurrence] = useState(false)
+  // Extra lesson modal state
+  const [extraModalOpen, setExtraModalOpen] = useState(false)
+  const [extraGroupId, setExtraGroupId] = useState(groups[0]?.id || '')
+  const [extraStartTime, setExtraStartTime] = useState('17:00')
+  const [extraEndTime, setExtraEndTime] = useState('18:30')
+  const [launchingExtra, setLaunchingExtra] = useState(false)
 
-  // Filter occurrences by group
-  const groupOccurrences = occurrences.filter((o) => o.group_id === selectedGroupId)
+  // Today helpers
+  const today = useMemo(() => new Date(), [])
+  const todayDateStr = useMemo(() => today.toISOString().split('T')[0], [today])
+  const todayWeekday = useMemo(() => today.getDay(), [today]) // 0 = Sunday, 6 = Saturday
+
+  // Groups that have sessions scheduled for TODAY
+  const todayScheduledGroups = useMemo(() => {
+    return groups
+      .map((g) => {
+        const matchingSessions = (g.sessions || []).filter((s) => s.weekday === todayWeekday)
+        const existingOcc = occurrences.find(
+          (o) => o.group_id === g.id && o.session_date === todayDateStr
+        )
+        return {
+          group: g,
+          sessions: matchingSessions,
+          existingOccurrence: existingOcc,
+        }
+      })
+      .filter((item) => item.sessions.length > 0 || Boolean(item.existingOccurrence))
+  }, [groups, occurrences, todayDateStr, todayWeekday])
+
+  // Current Occurrence & Group
   const currentOccurrence = occurrences.find((o) => o.id === selectedOccurrenceId)
-
-  // Filter students by group
+  const currentGroup = groups.find((g) => g.id === selectedGroupId)
   const groupStudents = students.filter((s) => s.group_id === selectedGroupId)
 
-  // Auto select occurrence when group changes
+  // Load existing saved attendance whenever selectedOccurrenceId changes
   useEffect(() => {
-    if (groupOccurrences.length > 0) {
-      const today = new Date().toISOString().split('T')[0]
-      const matchingToday = groupOccurrences.find((o) => o.session_date === today)
-      setSelectedOccurrenceId(matchingToday?.id || groupOccurrences[0].id)
-    } else {
-      setSelectedOccurrenceId('')
-    }
-  }, [selectedGroupId, occurrences])
+    let isMounted = true
+    async function loadAttendance() {
+      if (!selectedOccurrenceId) return
 
-  // Initialize all group students as 'present' by default
-  useEffect(() => {
-    const initialMap: Record<string, AttendanceStatus> = {}
-    groupStudents.forEach((st) => {
-      initialMap[st.id] = 'present'
-    })
-    setAttendanceMap(initialMap)
+      setLoadingExistingAttendance(true)
+      try {
+        const supabase = createClient()
+        const { data, error } = await supabase
+          .from('attendance')
+          .select('student_id, status')
+          .eq('occurrence_id', selectedOccurrenceId)
+
+        if (!isMounted) return
+
+        const map: Record<string, AttendanceStatus> = {}
+        // Default all to present initially
+        groupStudents.forEach((st) => {
+          map[st.id] = 'present'
+        })
+
+        // If records already saved in DB, restore them!
+        if (data && data.length > 0) {
+          data.forEach((row: any) => {
+            map[row.student_id] = row.status as AttendanceStatus
+          })
+        }
+        setAttendanceMap(map)
+      } catch (err) {
+        console.error('Error loading attendance for occurrence:', err)
+      } finally {
+        if (isMounted) setLoadingExistingAttendance(false)
+      }
+    }
+
+    loadAttendance()
+    return () => {
+      isMounted = false
+    }
   }, [selectedOccurrenceId, selectedGroupId])
+
+  // Handle Starting or Editing a Today Session
+  const handleStartTodaySession = async (
+    groupId: string,
+    existingOccurrence?: OccurrenceItem,
+    sessionTiming?: { start_time: string; end_time: string }
+  ) => {
+    setSelectedGroupId(groupId)
+
+    if (existingOccurrence) {
+      setSelectedOccurrenceId(existingOccurrence.id)
+      setActiveTab('sheet')
+      return
+    }
+
+    // If occurrence not created in DB yet, create it on the fly!
+    if (onAddOccurrence) {
+      const startTime = sessionTiming ? sessionTiming.start_time.slice(0, 5) : '17:00'
+      const endTime = sessionTiming ? sessionTiming.end_time.slice(0, 5) : '18:30'
+
+      const newId = await onAddOccurrence({
+        group_id: groupId,
+        session_date: todayDateStr,
+        start_time: startTime,
+        end_time: endTime,
+      })
+
+      if (newId) {
+        setSelectedOccurrenceId(newId)
+        setActiveTab('sheet')
+        return
+      }
+    }
+
+    setActiveTab('sheet')
+  }
+
+  // Handle Launching an Extra Lesson for Today
+  const handleLaunchExtraLesson = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!extraGroupId || !onAddOccurrence) return
+
+    setLaunchingExtra(true)
+    try {
+      const newId = await onAddOccurrence({
+        group_id: extraGroupId,
+        session_date: todayDateStr,
+        start_time: extraStartTime,
+        end_time: extraEndTime,
+      })
+
+      if (newId) {
+        setSelectedGroupId(extraGroupId)
+        setSelectedOccurrenceId(newId)
+        setExtraModalOpen(false)
+        setActiveTab('sheet')
+      }
+    } catch (err) {
+      console.error('Error launching extra lesson:', err)
+      alert('حدث خطأ أثناء بدء الحصة الإضافية')
+    } finally {
+      setLaunchingExtra(false)
+    }
+  }
 
   // Set student status directly
   const setStudentStatus = (studentId: string, status: AttendanceStatus) => {
@@ -110,15 +227,15 @@ export function AttendanceView({
   }
 
   // Quick mark all as present
-  const markAllPresent = () => {
+  const markAll = (status: AttendanceStatus) => {
     const updated: Record<string, AttendanceStatus> = {}
     groupStudents.forEach((st) => {
-      updated[st.id] = 'present'
+      updated[st.id] = status
     })
     setAttendanceMap(updated)
   }
 
-  // Handle Save
+  // Handle Save Attendance
   const handleSave = async () => {
     if (!selectedOccurrenceId) return
 
@@ -134,57 +251,9 @@ export function AttendanceView({
       setTimeout(() => setSaveSuccess(false), 3000)
     } catch (err) {
       console.error(err)
-      alert('حدث خطأ أثناء حفظ كشف الحضور')
+      alert('حدث خطأ أثناء حفظ كشف الحضور، يرجى المحاولة مرة أخرى')
     } finally {
       setSaving(false)
-    }
-  }
-
-  // Handle adding custom occurrence
-  const handleCreateOccurrence = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault()
-    if (!onAddOccurrence || !selectedGroupId) return
-
-    setAddingOccurrence(true)
-    try {
-      const newId = await onAddOccurrence({
-        group_id: selectedGroupId,
-        session_date: newDate,
-        start_time: newStartTime,
-        end_time: newEndTime,
-      })
-      if (newId) {
-        setSelectedOccurrenceId(newId)
-      }
-      setAddModalOpen(false)
-    } catch (err) {
-      console.error('Error adding session occurrence:', err)
-      alert('حدث خطأ أثناء إضافة موعد الحصة')
-    } finally {
-      setAddingOccurrence(false)
-    }
-  }
-
-  // Quick add today session
-  const handleQuickAddToday = async () => {
-    if (!onAddOccurrence || !selectedGroupId) return
-    const today = new Date().toISOString().split('T')[0]
-    setAddingOccurrence(true)
-    try {
-      const newId = await onAddOccurrence({
-        group_id: selectedGroupId,
-        session_date: today,
-        start_time: '17:00',
-        end_time: '18:30',
-      })
-      if (newId) {
-        setSelectedOccurrenceId(newId)
-      }
-    } catch (err) {
-      console.error('Error quick adding today occurrence:', err)
-      alert('حدث خطأ أثناء تسجيل حصة اليوم')
-    } finally {
-      setAddingOccurrence(false)
     }
   }
 
@@ -201,254 +270,512 @@ export function AttendanceView({
   const absentCount = Object.values(attendanceMap).filter((s) => s === 'absent').length
   const excusedCount = Object.values(attendanceMap).filter((s) => s === 'excused').length
 
+  // Filter past occurrences for History tab
+  const historyOccurrences = useMemo(() => {
+    return occurrences
+      .filter((o) => o.group_id === selectedGroupId && o.session_date <= todayDateStr)
+      .sort((a, b) => b.session_date.localeCompare(a.session_date))
+  }, [occurrences, selectedGroupId, todayDateStr])
+
   return (
     <div className="space-y-4 sm:space-y-6">
-      {/* Top Header */}
+      {/* Top Navigation Bar: Today's Lessons vs History */}
       <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
         <div>
           <h2 className="text-lg font-black text-[#153b68] sm:text-xl">كشف الحضور والغياب</h2>
           <p className="text-xs text-slate-500">
-            تسجيل الحضور بلمسة واحدة من هاتفك أثناء الحصة
+            {activeTab === 'today' && 'حصص اليوم فقط لتسجيل الحضور بسهولة وسرعة'}
+            {activeTab === 'sheet' && 'تسجيل حضور وغياب الطلاب للحصة الجارية'}
+            {activeTab === 'history' && 'سجل الحصص السابقة ومراجعة نسب الحضور والغياب'}
           </p>
         </div>
 
         <div className="flex items-center gap-2">
-          {currentOccurrence && (
+          {activeTab === 'sheet' && (
             <button
-              onClick={() =>
-                onToggleCancelOccurrence(currentOccurrence.id, currentOccurrence.status)
-              }
-              disabled={!teacherStatus.isActive}
-              className={`inline-flex items-center justify-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-bold transition disabled:opacity-50 ${
-                currentOccurrence.status === 'cancelled'
-                  ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
-                  : 'border-rose-300 bg-rose-50 text-rose-700'
-              }`}
+              type="button"
+              onClick={() => setActiveTab('today')}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-xs font-bold text-slate-700 shadow-xs hover:bg-slate-50"
             >
-              <Ban className="size-3.5" />
-              <span>
-                {currentOccurrence.status === 'cancelled' ? 'تفعيل الحصة' : 'إلغاء (عطلة)'}
-              </span>
+              <ArrowRight className="size-3.5" />
+              <span>العودة لحصص اليوم</span>
             </button>
           )}
 
-          <button
-            onClick={handleSave}
-            disabled={
-              !teacherStatus.isActive ||
-              !selectedOccurrenceId ||
-              saving ||
-              currentOccurrence?.status === 'cancelled'
-            }
-            className={`inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-xs font-bold text-white shadow-md transition disabled:opacity-50 ${
-              saveSuccess ? 'bg-emerald-600' : 'bg-[#1d5ca8] hover:bg-[#164e93]'
-            }`}
-          >
-            {saving ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : saveSuccess ? (
-              <CheckCircle2 className="size-4" />
-            ) : (
-              <Save className="size-4" />
-            )}
-            <span>{saveSuccess ? 'تم الحفظ بنجاح!' : 'حفظ الكشف'}</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Select Group & Occurrence Toolbar */}
-      <div className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-3.5 shadow-xs sm:grid-cols-2">
-        <div>
-          <label className="mb-1 block text-xs font-bold text-slate-700">المجموعة</label>
-          <select
-            value={selectedGroupId}
-            onChange={(e) => setSelectedGroupId(e.target.value)}
-            className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-xs font-bold text-slate-800 outline-hidden focus:bg-white"
-          >
-            {groups.map((g) => (
-              <option key={g.id} value={g.id}>
-                {g.name} ({g.grade})
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div>
-          <div className="mb-1 flex items-center justify-between">
-            <label className="text-xs font-bold text-slate-700">تاريخ وموعد الحصة</label>
-            {onAddOccurrence && (
+          {activeTab !== 'sheet' && (
+            <div className="inline-flex rounded-xl bg-slate-200/80 p-1 text-xs font-bold">
               <button
                 type="button"
-                onClick={() => setAddModalOpen(true)}
-                disabled={!teacherStatus.isActive || !selectedGroupId}
-                className="inline-flex items-center gap-1 text-[11px] font-bold text-[#1d5ca8] hover:underline disabled:opacity-50"
+                onClick={() => setActiveTab('today')}
+                className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 transition ${
+                  activeTab === 'today'
+                    ? 'bg-white text-[#153b68] shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
               >
-                <Plus className="size-3" />
-                <span>+ إضافة موعد مخصص</span>
+                <CalendarDays className="size-3.5 text-[#1d5ca8]" />
+                <span>حصص اليوم ({todayScheduledGroups.length})</span>
               </button>
-            )}
-          </div>
-          <select
-            value={selectedOccurrenceId}
-            onChange={(e) => setSelectedOccurrenceId(e.target.value)}
-            className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-xs font-bold text-slate-800 outline-hidden focus:bg-white"
-          >
-            {groupOccurrences.map((occ) => (
-              <option key={occ.id} value={occ.id}>
-                {formatArabicDate(occ.session_date)} ({occ.start_time.slice(0, 5)} - {occ.end_time.slice(0, 5)})
-                {occ.status === 'cancelled' ? ' [ملغاة]' : ''}
-              </option>
-            ))}
-            {groupOccurrences.length === 0 && <option value="">لا توجد حصص مجدولة لهذه المجموعة</option>}
-          </select>
+              <button
+                type="button"
+                onClick={() => setActiveTab('history')}
+                className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 transition ${
+                  activeTab === 'history'
+                    ? 'bg-white text-[#153b68] shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <History className="size-3.5 text-slate-600" />
+                <span>سجل الحصص (History)</span>
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Empty State Help Banner if no occurrences */}
-      {groupOccurrences.length === 0 && (
-        <div className="rounded-2xl border border-dashed border-amber-300 bg-amber-50 p-4 text-center">
-          <p className="text-xs font-bold text-amber-900 mb-2">
-            لا توجد مواعيد حصص مجدولة لهذه المجموعة حالياً لتسجيل الحضور.
-          </p>
-          <div className="flex flex-wrap items-center justify-center gap-2">
+      {/* ========================================================================= */}
+      {/* VIEW 1: TODAY'S LESSONS (حصص اليوم مخصوص) */}
+      {/* ========================================================================= */}
+      {activeTab === 'today' && (
+        <div className="space-y-4">
+          {/* Today Date Banner */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl border border-blue-100 bg-gradient-to-r from-blue-50 to-[#eaf2ff] p-4 text-[#153b68]">
+            <div className="flex items-center gap-3">
+              <div className="grid size-12 shrink-0 place-items-center rounded-2xl bg-[#1d5ca8] text-white shadow-sm">
+                <Calendar className="size-6" />
+              </div>
+              <div>
+                <p className="text-xs font-bold text-[#1d5ca8]">
+                  يوم {ARABIC_WEEKDAYS[todayWeekday]}
+                </p>
+                <h3 className="text-base sm:text-lg font-black text-slate-900">
+                  {formatArabicDate(todayDateStr)}
+                </h3>
+              </div>
+            </div>
+
             <button
               type="button"
-              onClick={handleQuickAddToday}
-              disabled={addingOccurrence || !teacherStatus.isActive}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-[#1d5ca8] px-3.5 py-2 text-xs font-bold text-white shadow-xs hover:bg-[#164e93] disabled:opacity-50"
-            >
-              {addingOccurrence ? (
-                <Loader2 className="size-3.5 animate-spin" />
-              ) : (
-                <CalendarDays className="size-3.5" />
-              )}
-              <span>+ تسجيل حصة بتاريخ اليوم الآن</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setAddModalOpen(true)}
-              disabled={addingOccurrence || !teacherStatus.isActive}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              onClick={() => setExtraModalOpen(true)}
+              disabled={!teacherStatus.isActive}
+              className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl border border-[#1d5ca8]/30 bg-white px-3.5 py-2 text-xs font-bold text-[#1d5ca8] shadow-xs hover:bg-blue-50/80 disabled:opacity-50"
             >
               <Plus className="size-3.5" />
-              <span>اختيار موعد مخصص</span>
+              <span>+ بدء حصة إضافية اليوم</span>
             </button>
+          </div>
+
+          {/* Today Scheduled Groups Cards */}
+          <div className="grid gap-3 sm:grid-cols-2">
+            {todayScheduledGroups.map(({ group, sessions, existingOccurrence }) => {
+              const timing = sessions[0] || {
+                start_time: existingOccurrence?.start_time || '17:00:00',
+                end_time: existingOccurrence?.end_time || '18:30:00',
+              }
+              const isRecorded = Boolean(existingOccurrence)
+              const studentCount = students.filter((s) => s.group_id === group.id).length
+
+              return (
+                <div
+                  key={group.id}
+                  className="flex flex-col justify-between rounded-2xl border border-slate-200 bg-white p-5 shadow-xs transition hover:border-[#1d5ca8]/40"
+                >
+                  <div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="rounded-lg bg-blue-50 px-2.5 py-1 text-xs font-bold text-[#1d5ca8]">
+                        {group.grade}
+                      </span>
+                      <span className="flex items-center gap-1 text-xs font-bold text-slate-500">
+                        <Users className="size-3.5" />
+                        <span>{studentCount} طالب</span>
+                      </span>
+                    </div>
+
+                    <h4 className="mt-2 text-base font-black text-slate-900">{group.name}</h4>
+
+                    <div className="mt-3 flex items-center gap-2 text-xs font-bold text-slate-600">
+                      <Clock3 className="size-4 text-slate-400" />
+                      <span>
+                        من {timing.start_time.slice(0, 5)} إلى {timing.end_time.slice(0, 5)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-3">
+                    <div className="flex items-center gap-1.5">
+                      {isRecorded ? (
+                        <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-700">
+                          <CheckCircle2 className="size-3" />
+                          <span>تم تسجيل الحضور</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-2 py-0.5 text-[11px] font-bold text-amber-700">
+                          <Clock3 className="size-3" />
+                          <span>الحصة لم تبدأ بعد</span>
+                        </span>
+                      )}
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled={!teacherStatus.isActive}
+                      onClick={() =>
+                        handleStartTodaySession(group.id, existingOccurrence, {
+                          start_time: timing.start_time,
+                          end_time: timing.end_time,
+                        })
+                      }
+                      className={`inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-bold text-white shadow-xs transition active:scale-95 disabled:opacity-50 ${
+                        isRecorded
+                          ? 'bg-slate-800 hover:bg-slate-900'
+                          : 'bg-[#1d5ca8] hover:bg-[#164e93]'
+                      }`}
+                    >
+                      {isRecorded ? (
+                        <>
+                          <Edit3 className="size-3.5" />
+                          <span>تعديل الكشف</span>
+                        </>
+                      ) : (
+                        <>
+                          <Play className="size-3.5 fill-current" />
+                          <span>بدء الحصة ورصد الحضور</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+
+            {todayScheduledGroups.length === 0 && (
+              <div className="col-span-full rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center text-slate-400">
+                <CalendarDays className="mx-auto size-12 text-slate-300" />
+                <h4 className="mt-3 text-sm font-bold text-slate-700">
+                  لا توجد حصص مجدولة ليوم {ARABIC_WEEKDAYS[todayWeekday]}
+                </h4>
+                <p className="mt-1 text-xs text-slate-500">
+                  جدولك الأسبوعي لا يحتوي على مجموعات في هذا اليوم. يمكنك بدء حصة إضافية لأي مجموعة الآن.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setExtraModalOpen(true)}
+                  disabled={!teacherStatus.isActive}
+                  className="mt-4 inline-flex items-center gap-1.5 rounded-xl bg-[#1d5ca8] px-4 py-2 text-xs font-bold text-white shadow-xs hover:bg-[#164e93] disabled:opacity-50"
+                >
+                  <Plus className="size-3.5" />
+                  <span>بدء حصة إضافية الآن</span>
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
 
-      {/* Cancelled Alert Banner */}
-      {currentOccurrence?.status === 'cancelled' && (
-        <div className="flex items-center gap-2.5 rounded-2xl border border-rose-200 bg-rose-50 p-3.5 text-xs font-bold text-rose-800">
-          <Ban className="size-4 shrink-0 text-rose-600" />
-          <span>هذه الحصة ملغاة (إجازة/ظرف طارئ). لن يُحسب أي غياب على الطلاب.</span>
-        </div>
-      )}
-
-      {/* Quick Summary Pill Counters (Phone Optimized) */}
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-white p-3 border border-slate-200 text-xs font-bold">
-        <div className="flex items-center gap-2 overflow-x-auto py-0.5">
-          <span className="rounded-lg bg-emerald-50 px-2 py-1 text-emerald-700">
-            حاضر: {presentCount}
-          </span>
-          <span className="rounded-lg bg-amber-50 px-2 py-1 text-amber-700">
-            متأخر: {lateCount}
-          </span>
-          <span className="rounded-lg bg-rose-50 px-2 py-1 text-rose-700">
-            غائب: {absentCount}
-          </span>
-          <span className="rounded-lg bg-blue-50 px-2 py-1 text-blue-700">
-            معذور: {excusedCount}
-          </span>
-        </div>
-
-        <button
-          onClick={markAllPresent}
-          disabled={!teacherStatus.isActive || currentOccurrence?.status === 'cancelled'}
-          className="text-xs font-bold text-[#1d5ca8] hover:underline disabled:opacity-50"
-        >
-          الكل حاضر
-        </button>
-      </div>
-
-      {/* Mobile-First Student Cards */}
-      <div className="space-y-2.5">
-        {groupStudents.map((st) => {
-          const currentStatus = attendanceMap[st.id] || 'present'
-
-          return (
-            <div
-              key={st.id}
-              className="flex flex-col gap-2.5 rounded-2xl border border-slate-200 bg-white p-3.5 shadow-xs sm:flex-row sm:items-center sm:justify-between"
-            >
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-xs font-extrabold text-slate-800">{st.full_name}</p>
-                <p className="text-[11px] text-slate-400 font-mono" dir="ltr">
-                  {st.parent_phone}
+      {/* ========================================================================= */}
+      {/* VIEW 2: ACTIVE LESSON ATTENDANCE SHEET (شيت رصد الحصة) */}
+      {/* ========================================================================= */}
+      {activeTab === 'sheet' && (
+        <div className="space-y-4">
+          {/* Active Lesson Header Card */}
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="rounded-md bg-blue-50 px-2 py-0.5 text-xs font-bold text-[#1d5ca8]">
+                    {currentGroup?.grade}
+                  </span>
+                  <h3 className="text-base sm:text-lg font-black text-slate-900">
+                    {currentGroup?.name}
+                  </h3>
+                </div>
+                <p className="mt-1 text-xs text-slate-500">
+                  {currentOccurrence?.session_date
+                    ? formatArabicDate(currentOccurrence.session_date)
+                    : formatArabicDate(todayDateStr)}{' '}
+                  · من {currentOccurrence?.start_time.slice(0, 5) || '17:00'} إلى{' '}
+                  {currentOccurrence?.end_time.slice(0, 5) || '18:30'}
                 </p>
               </div>
 
-              {/* 4 Direct One-Touch Buttons (Perfect for mobile phones) */}
-              <div className="grid grid-cols-4 gap-1 sm:flex sm:items-center">
-                {statuses.map(({ key, label, activeClass }) => {
-                  const isSelected = currentStatus === key
-                  return (
-                    <button
-                      key={key}
-                      type="button"
-                      onClick={() => setStudentStatus(st.id, key)}
-                      disabled={!teacherStatus.isActive || currentOccurrence?.status === 'cancelled'}
-                      className={`h-9 min-w-14 rounded-xl text-xs font-bold transition active:scale-95 disabled:opacity-50 ${
-                        isSelected
-                          ? activeClass
-                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  )
-                })}
+              <div className="flex items-center gap-2">
+                {currentOccurrence && (
+                  <button
+                    onClick={() =>
+                      onToggleCancelOccurrence(currentOccurrence.id, currentOccurrence.status)
+                    }
+                    disabled={!teacherStatus.isActive}
+                    className={`inline-flex items-center justify-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-bold transition disabled:opacity-50 ${
+                      currentOccurrence.status === 'cancelled'
+                        ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
+                        : 'border-rose-300 bg-rose-50 text-rose-700'
+                    }`}
+                  >
+                    <Ban className="size-3.5" />
+                    <span>
+                      {currentOccurrence.status === 'cancelled' ? 'تفعيل الحصة' : 'إلغاء (عطلة)'}
+                    </span>
+                  </button>
+                )}
+
+                <button
+                  onClick={handleSave}
+                  disabled={
+                    !teacherStatus.isActive ||
+                    !selectedOccurrenceId ||
+                    saving ||
+                    currentOccurrence?.status === 'cancelled'
+                  }
+                  className={`inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-xs font-bold text-white shadow-md transition disabled:opacity-50 ${
+                    saveSuccess ? 'bg-emerald-600' : 'bg-[#1d5ca8] hover:bg-[#164e93]'
+                  }`}
+                >
+                  {saving ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : saveSuccess ? (
+                    <CheckCircle2 className="size-4" />
+                  ) : (
+                    <Save className="size-4" />
+                  )}
+                  <span>{saveSuccess ? 'تم الحفظ بنجاح!' : 'حفظ الكشف'}</span>
+                </button>
               </div>
             </div>
-          )
-        })}
 
-        {groupStudents.length === 0 && (
-          <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center text-slate-400">
-            <Users className="mx-auto size-8 text-slate-300" />
-            <p className="mt-2 text-xs font-bold text-slate-600">لا يوجد طلاب في هذه المجموعة</p>
+            {/* Cancelled Alert Banner */}
+            {currentOccurrence?.status === 'cancelled' && (
+              <div className="mt-3 flex items-center gap-2.5 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs font-bold text-rose-800">
+                <Ban className="size-4 shrink-0 text-rose-600" />
+                <span>هذه الحصة ملغاة (إجازة/ظرف طارئ). لن يُحسب أي غياب على الطلاب.</span>
+              </div>
+            )}
+
+            {/* Quick Counters & Fast Actions Bar */}
+            <div className="mt-3.5 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3 text-xs font-bold">
+              <div className="flex items-center gap-1.5 overflow-x-auto py-0.5">
+                <span className="rounded-lg bg-emerald-50 px-2 py-1 text-emerald-700">
+                  حاضر: {presentCount}
+                </span>
+                <span className="rounded-lg bg-amber-50 px-2 py-1 text-amber-700">
+                  متأخر: {lateCount}
+                </span>
+                <span className="rounded-lg bg-rose-50 px-2 py-1 text-rose-700">
+                  غائب: {absentCount}
+                </span>
+                <span className="rounded-lg bg-blue-50 px-2 py-1 text-blue-700">
+                  معذور: {excusedCount}
+                </span>
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => markAll('present')}
+                  disabled={!teacherStatus.isActive || currentOccurrence?.status === 'cancelled'}
+                  className="rounded-lg bg-slate-100 px-2 py-1 text-[11px] text-slate-700 hover:bg-slate-200"
+                >
+                  الكل حاضر
+                </button>
+                <button
+                  type="button"
+                  onClick={() => markAll('absent')}
+                  disabled={!teacherStatus.isActive || currentOccurrence?.status === 'cancelled'}
+                  className="rounded-lg bg-slate-100 px-2 py-1 text-[11px] text-slate-700 hover:bg-slate-200"
+                >
+                  الكل غائب
+                </button>
+              </div>
+            </div>
           </div>
-        )}
-      </div>
 
-      {/* Modal for adding custom session occurrence */}
+          {/* Loading Indicator for Existing Records */}
+          {loadingExistingAttendance && (
+            <div className="flex items-center justify-center gap-2 rounded-xl bg-slate-50 p-4 text-xs font-bold text-slate-500">
+              <Loader2 className="size-4 animate-spin text-[#1d5ca8]" />
+              <span>جاري تحميل السجلات المحفوظة للحصة...</span>
+            </div>
+          )}
+
+          {/* Student Attendance Cards */}
+          <div className="space-y-2">
+            {groupStudents.map((st, sIndex) => {
+              const currentStatus = attendanceMap[st.id] || 'present'
+
+              return (
+                <div
+                  key={st.id}
+                  className="flex flex-col gap-2 rounded-2xl border border-slate-200 bg-white p-3.5 shadow-2xs transition sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <span className="grid size-6 shrink-0 place-items-center rounded-lg bg-slate-100 text-xs font-bold text-slate-500">
+                      {sIndex + 1}
+                    </span>
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-800">{st.full_name}</h4>
+                      <p className="text-[11px] text-slate-400">
+                        كود: <span className="font-mono text-slate-600">{st.access_code}</span> ·
+                        هاتف: {st.parent_phone}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* 4 Direct Touch Buttons */}
+                  <div className="grid grid-cols-4 gap-1 sm:flex sm:items-center">
+                    {statuses.map(({ key, label, activeClass }) => {
+                      const isSelected = currentStatus === key
+                      return (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => setStudentStatus(st.id, key)}
+                          disabled={
+                            !teacherStatus.isActive || currentOccurrence?.status === 'cancelled'
+                          }
+                          className={`h-9 min-w-14 rounded-xl text-xs font-bold transition active:scale-95 disabled:opacity-50 ${
+                            isSelected
+                              ? activeClass
+                              : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })}
+
+            {groupStudents.length === 0 && (
+              <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center text-slate-400">
+                <Users className="mx-auto size-8 text-slate-300" />
+                <p className="mt-2 text-xs font-bold text-slate-600">لا يوجد طلاب في هذه المجموعة</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* VIEW 3: ATTENDANCE HISTORY (سجل الحصص السابقة لكل مجموعة) */}
+      {/* ========================================================================= */}
+      {activeTab === 'history' && (
+        <div className="space-y-4">
+          {/* Select Group Filter */}
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
+            <label className="mb-1.5 block text-xs font-bold text-slate-700">
+              اختر المجموعة الدراسية لعرض سجل حصصها:
+            </label>
+            <select
+              value={selectedGroupId}
+              onChange={(e) => setSelectedGroupId(e.target.value)}
+              className="w-full sm:w-72 rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-xs font-bold text-slate-800 outline-hidden focus:bg-white"
+            >
+              {groups.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.name} ({g.grade})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Past Sessions List */}
+          <div className="space-y-2.5">
+            {historyOccurrences.map((occ) => {
+              const isToday = occ.session_date === todayDateStr
+              return (
+                <div
+                  key={occ.id}
+                  className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-xs hover:border-[#1d5ca8]/40 transition"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="grid size-10 place-items-center rounded-xl bg-slate-100 text-slate-700">
+                      <CalendarDays className="size-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-sm font-black text-slate-900">
+                          {formatArabicDate(occ.session_date)}
+                        </h4>
+                        {isToday && (
+                          <span className="rounded-md bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+                            اليوم
+                          </span>
+                        )}
+                        {occ.status === 'cancelled' && (
+                          <span className="rounded-md bg-rose-50 px-2 py-0.5 text-[10px] font-bold text-rose-700">
+                            حصة ملغاة
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-slate-500">
+                        التوقيت: من {occ.start_time.slice(0, 5)} إلى {occ.end_time.slice(0, 5)}
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedOccurrenceId(occ.id)
+                      setActiveTab('sheet')
+                    }}
+                    className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-[#1d5ca8] px-4 py-2 text-xs font-bold text-white shadow-xs hover:bg-[#164e93]"
+                  >
+                    <Edit3 className="size-3.5" />
+                    <span>عرض وتعديل كشف الحضور</span>
+                  </button>
+                </div>
+              )
+            })}
+
+            {historyOccurrences.length === 0 && (
+              <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center text-slate-400">
+                <History className="mx-auto size-8 text-slate-300" />
+                <p className="mt-2 text-xs font-bold text-slate-600">
+                  لا توجد حصص سابقة مسجلة لهذه المجموعة بعد
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Extra Lesson Modal */}
       <Modal
-        isOpen={addModalOpen}
-        onClose={() => setAddModalOpen(false)}
-        title="إضافة موعد حصة جديد للمجموعة"
+        isOpen={extraModalOpen}
+        onClose={() => setExtraModalOpen(false)}
+        title="بدء حصة إضافية اليوم"
       >
-        <form onSubmit={handleCreateOccurrence} className="space-y-4">
+        <form onSubmit={handleLaunchExtraLesson} className="space-y-4">
           <div>
-            <DatePicker
-              label="تاريخ الحصة"
-              value={newDate}
-              onChange={setNewDate}
-            />
+            <label className="mb-1 block text-xs font-bold text-slate-700">المجموعة</label>
+            <select
+              value={extraGroupId}
+              onChange={(e) => setExtraGroupId(e.target.value)}
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-xs font-bold text-slate-800 outline-hidden focus:bg-white"
+            >
+              {groups.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.name} ({g.grade})
+                </option>
+              ))}
+            </select>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
               <TimePicker
                 label="وقت البدء"
-                value={newStartTime}
-                onChange={setNewStartTime}
+                value={extraStartTime}
+                onChange={setExtraStartTime}
               />
             </div>
             <div>
               <TimePicker
                 label="وقت الانتهاء"
-                value={newEndTime}
-                onChange={setNewEndTime}
+                value={extraEndTime}
+                onChange={setExtraEndTime}
               />
             </div>
           </div>
@@ -456,18 +783,18 @@ export function AttendanceView({
           <div className="flex items-center justify-end gap-2 pt-2">
             <button
               type="button"
-              onClick={() => setAddModalOpen(false)}
+              onClick={() => setExtraModalOpen(false)}
               className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50"
             >
               إلغاء
             </button>
             <button
               type="submit"
-              disabled={addingOccurrence}
+              disabled={launchingExtra}
               className="inline-flex items-center gap-1.5 rounded-xl bg-[#1d5ca8] px-4 py-2 text-xs font-bold text-white hover:bg-[#164e93] disabled:opacity-50"
             >
-              {addingOccurrence && <Loader2 className="size-3.5 animate-spin" />}
-              <span>حفظ وتحديد الموعد</span>
+              {launchingExtra && <Loader2 className="size-3.5 animate-spin" />}
+              <span>بدء الحصة الآن</span>
             </button>
           </div>
         </form>

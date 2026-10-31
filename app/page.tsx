@@ -502,15 +502,25 @@ export default function TeacherAppPage() {
     } = await supabase.auth.getUser()
 
     if (user) {
-      for (const rec of records) {
-        await supabase.from('attendance').upsert({
-          teacher_id: user.id,
-          occurrence_id: occurrenceId,
-          student_id: rec.student_id,
-          status: rec.status,
-          note: rec.note || null,
-        })
+      const payload = records.map((rec) => ({
+        teacher_id: user.id,
+        occurrence_id: occurrenceId,
+        student_id: rec.student_id,
+        status: rec.status,
+        note: rec.note || null,
+      }))
+
+      const { error } = await supabase
+        .from('attendance')
+        .upsert(payload, { onConflict: 'occurrence_id,student_id' })
+
+      if (error) {
+        console.error('[Attendance Save] Upsert Error:', error)
+        throw error
       }
+
+      // Refresh absences and application state
+      await loadData()
     }
   }
 
