@@ -8,7 +8,6 @@ import {
   CheckCircle2,
   Send,
   Loader2,
-  HelpCircle,
   Award,
 } from 'lucide-react'
 
@@ -222,7 +221,7 @@ export default function StudentExamPage({
 
   if (loadingMeta) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#f6f8fb] text-[#17263b]">
+      <div className="flex min-h-screen items-center justify-center bg-[#f6f8fb] text-[#17263b] p-4">
         <div className="flex items-center gap-3 rounded-2xl bg-white px-6 py-4 shadow-sm">
           <Loader2 className="size-5 animate-spin text-[#1d5ca8]" />
           <span className="text-sm font-bold">جاري تحميل الاختبار...</span>
@@ -234,12 +233,12 @@ export default function StudentExamPage({
   if (metaError || !meta) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center bg-[#f6f8fb] p-4 text-[#17263b]">
-        <div className="w-full max-w-md rounded-3xl border border-rose-200 bg-white p-8 text-center shadow-lg">
+        <div className="w-full max-w-md rounded-3xl border border-rose-200 bg-white p-6 sm:p-8 text-center shadow-lg">
           <div className="mx-auto grid size-14 place-items-center rounded-2xl bg-rose-50 text-rose-600">
             <AlertCircle className="size-8" />
           </div>
-          <h2 className="mt-4 text-xl font-bold text-slate-800">تعذر فتح الاختبار</h2>
-          <p className="mt-2 text-sm text-slate-500">{metaError || 'الرابط غير صالح'}</p>
+          <h2 className="mt-4 text-lg sm:text-xl font-bold text-slate-800">تعذر فتح الاختبار</h2>
+          <p className="mt-2 text-xs sm:text-sm text-slate-500">{metaError || 'الرابط غير صالح'}</p>
         </div>
       </div>
     )
@@ -249,32 +248,32 @@ export default function StudentExamPage({
   if (isSubmitted) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center bg-[#f6f8fb] p-4 text-[#17263b]">
-        <div className="w-full max-w-lg rounded-3xl border border-[#e6ebf2] bg-white p-8 text-center shadow-xl">
+        <div className="w-full max-w-lg rounded-3xl border border-[#e6ebf2] bg-white p-6 sm:p-8 text-center shadow-xl">
           <div className="mx-auto grid size-16 place-items-center rounded-2xl bg-emerald-50 text-emerald-600">
             <CheckCircle2 className="size-10" />
           </div>
 
-          <h2 className="mt-5 text-2xl font-extrabold text-[#153b68]">تم تسليم الاختبار بنجاح</h2>
-          <p className="mt-2 text-sm text-slate-600">
+          <h2 className="mt-4 text-xl sm:text-2xl font-extrabold text-[#153b68]">تم تسليم الاختبار بنجاح</h2>
+          <p className="mt-2 text-xs sm:text-sm text-slate-600">
             شكراً لك، <span className="font-bold text-slate-800">{studentName}</span>. تم تسجيل إجاباتك بنجاح على الخادم.
           </p>
 
           {resultData?.results_released ? (
-            <div className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50/70 p-6 text-emerald-900">
+            <div className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50/70 p-5 sm:p-6 text-emerald-900">
               <div className="mx-auto grid size-12 place-items-center rounded-full bg-emerald-100 text-emerald-700">
                 <Award className="size-6" />
               </div>
               <p className="mt-3 text-xs font-bold text-emerald-700">درجة الاختبار</p>
-              <p className="mt-1 text-4xl font-black">
+              <p className="mt-1 text-3xl sm:text-4xl font-black">
                 {resultData.score}{' '}
-                <span className="text-xl font-normal text-emerald-600">/ {resultData.max_score}</span>
+                <span className="text-lg sm:text-xl font-normal text-emerald-600">/ {resultData.max_score}</span>
               </p>
               <p className="mt-2 text-xs font-semibold">
                 النسبة المئوية: {Math.round(((resultData.score || 0) / (resultData.max_score || 1)) * 100)}%
               </p>
             </div>
           ) : (
-            <div className="mt-6 rounded-2xl border border-blue-100 bg-blue-50/70 p-5 text-sm text-blue-900">
+            <div className="mt-6 rounded-2xl border border-blue-100 bg-blue-50/70 p-4 sm:p-5 text-xs sm:text-sm text-blue-900">
               <p className="font-bold">ملاحظة بشأن النتيجة</p>
               <p className="mt-1 text-xs text-blue-700">
                 سيتم إعلان الدرجة والتفاصيل من قبل الأستاذ بعد انتهاء موعد الاختبار ومراجعة الإجابات.
@@ -282,7 +281,7 @@ export default function StudentExamPage({
             </div>
           )}
 
-          <div className="mt-8 border-t border-slate-100 pt-4 text-xs text-slate-400">
+          <div className="mt-6 border-t border-slate-100 pt-4 text-xs text-slate-400">
             {meta.title} · الأستاذ: {meta.teacher_name} ({meta.subject})
           </div>
         </div>
@@ -294,12 +293,12 @@ export default function StudentExamPage({
   if (!submissionId) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center bg-[#f6f8fb] p-4 text-[#17263b]">
-        <div className="w-full max-w-md rounded-3xl border border-[#e6ebf2] bg-white p-8 shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
+        <div className="w-full max-w-md rounded-3xl border border-[#e6ebf2] bg-white p-6 sm:p-8 shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
           <div className="flex flex-col items-center text-center">
-            <div className="grid size-14 place-items-center rounded-2xl bg-[#153b68] text-white shadow-md">
-              <GraduationCap className="size-8" />
+            <div className="grid size-12 sm:size-14 place-items-center rounded-2xl bg-[#153b68] text-white shadow-md">
+              <GraduationCap className="size-6 sm:size-8" />
             </div>
-            <h1 className="mt-4 text-xl font-extrabold text-[#153b68]">{meta.title}</h1>
+            <h1 className="mt-4 text-lg sm:text-xl font-extrabold text-[#153b68]">{meta.title}</h1>
             <p className="mt-1 text-xs text-slate-500">
               الأستاذ: {meta.teacher_name} · مادة {meta.subject}
             </p>
@@ -310,7 +309,7 @@ export default function StudentExamPage({
             )}
           </div>
 
-          <div className="mt-6 flex items-center justify-around rounded-2xl bg-slate-50 p-3 text-center text-xs text-slate-600">
+          <div className="mt-5 flex items-center justify-around rounded-2xl bg-slate-50 p-3 text-center text-xs text-slate-600">
             <div>
               <p className="text-[11px] text-slate-400">مدة الاختبار</p>
               <p className="mt-0.5 font-bold">{meta.duration_min} دقيقة</p>
@@ -328,7 +327,7 @@ export default function StudentExamPage({
               {meta.closedReason || 'الاختبار مغلق حالياً'}
             </div>
           ) : (
-            <form onSubmit={handleStartExam} className="mt-6 space-y-4">
+            <form onSubmit={handleStartExam} className="mt-5 space-y-4">
               {startError && (
                 <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs font-semibold text-rose-700">
                   <AlertCircle className="size-4 shrink-0" />
@@ -342,11 +341,13 @@ export default function StudentExamPage({
                 </label>
                 <input
                   type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   required
                   value={accessCode}
                   onChange={(e) => setAccessCode(e.target.value)}
                   placeholder="مثال: 48921"
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50/50 py-3 px-4 text-center font-mono text-lg font-bold tracking-widest transition focus:border-[#1d5ca8] focus:bg-white focus:outline-hidden"
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50/50 py-3.5 px-4 text-center font-mono text-xl font-bold tracking-widest transition focus:border-[#1d5ca8] focus:bg-white focus:outline-hidden"
                   autoFocus
                 />
                 <p className="mt-1.5 text-center text-[11px] text-slate-400">
@@ -357,7 +358,7 @@ export default function StudentExamPage({
               <button
                 type="submit"
                 disabled={starting || !accessCode.trim()}
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#1d5ca8] py-3 text-sm font-bold text-white shadow-md transition hover:bg-[#164e93] disabled:opacity-50"
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#1d5ca8] py-3 text-sm font-bold text-white shadow-md transition hover:bg-[#164e93] active:scale-98 disabled:opacity-50"
               >
                 {starting ? (
                   <>
@@ -365,9 +366,7 @@ export default function StudentExamPage({
                     جاري التحقق وبدء الاختبار...
                   </>
                 ) : (
-                  <>
-                    <span>ابدأ الاختبار الآن</span>
-                  </>
+                  <span>ابدأ الاختبار الآن</span>
                 )}
               </button>
             </form>
@@ -377,35 +376,37 @@ export default function StudentExamPage({
     )
   }
 
-  // Render Step 2: Live Exam Taking
+  // Render Step 2: Live Exam Taking (Mobile-Screen Optimized)
   const answeredCount = Object.keys(selectedAnswers).length
   const totalCount = questions.length
 
   return (
-    <div className="min-h-screen bg-[#f6f8fb] text-[#17263b]">
-      {/* Sticky Top Header with Timer and Student Info */}
-      <header className="sticky top-0 z-30 border-b border-[#e6ebf2] bg-white/95 backdrop-blur-xs">
-        <div className="mx-auto flex max-w-4xl items-center justify-between px-4 py-3 sm:px-6">
-          <div className="min-w-0">
-            <h1 className="truncate text-base font-extrabold text-[#153b68]">{meta.title}</h1>
-            <p className="text-xs text-slate-500">الطالب: {studentName}</p>
+    <div className="min-h-screen bg-[#f6f8fb] text-[#17263b] pb-24 sm:pb-12">
+      {/* Sticky Top Mobile Header with Timer and Student Info */}
+      <header className="sticky top-0 z-30 border-b border-[#e6ebf2] bg-white/95 backdrop-blur-md px-4 py-2.5 sm:py-3">
+        <div className="mx-auto flex max-w-3xl items-center justify-between">
+          <div className="min-w-0 pr-1">
+            <h1 className="truncate text-sm sm:text-base font-extrabold text-[#153b68]">
+              {meta.title}
+            </h1>
+            <p className="text-[11px] text-slate-500 truncate">الطالب: {studentName}</p>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             {/* Progress counter */}
-            <div className="hidden text-xs font-bold text-slate-600 sm:block">
-              أجبت على <span className="text-[#1d5ca8]">{answeredCount}</span> من {totalCount}
-            </div>
+            <span className="rounded-lg bg-slate-100 px-2 py-1 text-[11px] font-bold text-slate-700">
+              {answeredCount}/{totalCount}
+            </span>
 
             {/* Countdown timer pill */}
             <div
-              className={`flex items-center gap-1.5 rounded-xl px-3 py-1.5 font-mono text-sm font-bold shadow-xs ${
+              className={`flex items-center gap-1.5 rounded-xl px-2.5 py-1 font-mono text-xs font-bold shadow-xs ${
                 secondsRemaining < 300
                   ? 'bg-rose-50 text-rose-600 animate-pulse border border-rose-200'
                   : 'bg-slate-100 text-[#153b68]'
               }`}
             >
-              <Clock className="size-4" />
+              <Clock className="size-3.5" />
               <span>{formattedTime}</span>
             </div>
           </div>
@@ -413,119 +414,115 @@ export default function StudentExamPage({
       </header>
 
       {/* Main Question Flow */}
-      <main className="mx-auto max-w-4xl px-4 py-6 sm:px-6">
-        <div className="space-y-6">
-          {questions.map((q, qIndex) => {
-            const isAnswered = selectedAnswers[q.id] !== undefined
-            const selectedOpt = selectedAnswers[q.id]
+      <main className="mx-auto max-w-3xl px-3 sm:px-6 py-4 space-y-4">
+        {questions.map((q, qIndex) => {
+          const isAnswered = selectedAnswers[q.id] !== undefined
+          const selectedOpt = selectedAnswers[q.id]
 
-            return (
-              <div
-                key={q.id}
-                className={`rounded-2xl border bg-white p-5 sm:p-6 shadow-xs transition ${
-                  isAnswered ? 'border-[#1d5ca8]/30 ring-1 ring-[#1d5ca8]/10' : 'border-slate-200'
-                }`}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-2">
-                    <span className="grid size-7 place-items-center rounded-lg bg-[#153b68] text-xs font-bold text-white">
-                      {qIndex + 1}
-                    </span>
-                    <span className="text-xs font-bold text-slate-400">
-                      ({q.marks} {q.marks === 1 ? 'درجة' : 'درجات'})
-                    </span>
-                  </div>
-
-                  {autosavingQuestionId === q.id && (
-                    <span className="text-[11px] text-slate-400 animate-pulse">جاري الحفظ...</span>
-                  )}
+          return (
+            <div
+              key={q.id}
+              className={`rounded-2xl border bg-white p-4 sm:p-6 shadow-xs transition ${
+                isAnswered ? 'border-[#1d5ca8]/40 ring-1 ring-[#1d5ca8]/10' : 'border-slate-200'
+              }`}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="grid size-6 place-items-center rounded-lg bg-[#153b68] text-xs font-bold text-white">
+                    {qIndex + 1}
+                  </span>
+                  <span className="text-xs font-bold text-slate-400">
+                    ({q.marks} {q.marks === 1 ? 'درجة' : 'درجات'})
+                  </span>
                 </div>
 
-                {/* Question Body */}
-                <p className="mt-3 text-base font-bold text-slate-800 leading-relaxed sm:text-lg">
-                  {q.body}
-                </p>
-
-                {/* Optional Image */}
-                {q.image_path && (
-                  <div className="mt-3 overflow-hidden rounded-xl border border-slate-200">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={q.image_path}
-                      alt="توضيح السؤال"
-                      className="max-h-72 w-full object-contain bg-slate-50"
-                    />
-                  </div>
+                {autosavingQuestionId === q.id && (
+                  <span className="text-[10px] text-slate-400 animate-pulse">جاري الحفظ...</span>
                 )}
-
-                {/* Options List */}
-                <div className="mt-5 space-y-2.5">
-                  {q.options.map((option, optIdx) => {
-                    const isSelected = selectedOpt === optIdx
-
-                    return (
-                      <button
-                        key={optIdx}
-                        type="button"
-                        onClick={() => handleSelectOption(q.id, optIdx)}
-                        className={`flex w-full items-center justify-between rounded-xl border p-3.5 text-right text-sm font-semibold transition ${
-                          isSelected
-                            ? 'border-[#1d5ca8] bg-[#eaf2ff] text-[#1d5ca8] shadow-xs'
-                            : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50'
-                        }`}
-                      >
-                        <div className="flex items-center gap-3">
-                          <span
-                            className={`grid size-6 place-items-center rounded-full text-xs font-bold ${
-                              isSelected
-                                ? 'bg-[#1d5ca8] text-white'
-                                : 'border border-slate-300 text-slate-500'
-                            }`}
-                          >
-                            {String.fromCharCode(65 + optIdx)}
-                          </span>
-                          <span>{option}</span>
-                        </div>
-                        {isSelected && <CheckCircle2 className="size-4 text-[#1d5ca8]" />}
-                      </button>
-                    )
-                  })}
-                </div>
               </div>
-            )
-          })}
-        </div>
 
-        {/* Submit Action Bar */}
-        <div className="mt-8 mb-12 flex flex-col items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:flex-row">
-          <div>
-            <p className="text-sm font-bold text-slate-800">
-              إجمالي الأسئلة المُجابة: {answeredCount} من {totalCount}
-            </p>
-            {answeredCount < totalCount && (
-              <p className="text-xs text-amber-600 font-semibold">
-                تنبيه: يوجد {totalCount - answeredCount} أسئلة لم يتم الإجابة عليها بعد.
+              {/* Question Body */}
+              <p className="mt-2.5 text-sm sm:text-base font-bold text-slate-800 leading-relaxed">
+                {q.body}
               </p>
-            )}
-          </div>
 
-          <button
-            onClick={handleFinalSubmit}
-            disabled={submitting}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#1d5ca8] px-8 py-3 text-sm font-bold text-white shadow-md transition hover:bg-[#164e93] sm:w-auto disabled:opacity-50"
-          >
-            {submitting ? (
-              <>
-                <Loader2 className="size-4 animate-spin" />
-                جاري تسليم الإجابات...
-              </>
-            ) : (
-              <>
-                <Send className="size-4" />
-                <span>تسليم الاختبار وإنهاء المحاولة</span>
-              </>
-            )}
-          </button>
+              {/* Optional Image */}
+              {q.image_path && (
+                <div className="mt-2.5 overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={q.image_path}
+                    alt="توضيح السؤال"
+                    className="max-h-60 w-full object-contain"
+                  />
+                </div>
+              )}
+
+              {/* Phone-Friendly Options (Minimum 48px Touch Height) */}
+              <div className="mt-3.5 space-y-2">
+                {q.options.map((option, optIdx) => {
+                  const isSelected = selectedOpt === optIdx
+
+                  return (
+                    <button
+                      key={optIdx}
+                      type="button"
+                      onClick={() => handleSelectOption(q.id, optIdx)}
+                      className={`flex min-h-[48px] w-full items-center justify-between rounded-xl border p-3 text-right text-xs sm:text-sm font-semibold transition active:scale-[0.99] ${
+                        isSelected
+                          ? 'border-[#1d5ca8] bg-[#eaf2ff] text-[#1d5ca8] shadow-xs'
+                          : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span
+                          className={`grid size-6 shrink-0 place-items-center rounded-full text-xs font-bold ${
+                            isSelected
+                              ? 'bg-[#1d5ca8] text-white'
+                              : 'border border-slate-300 text-slate-500'
+                          }`}
+                        >
+                          {String.fromCharCode(65 + optIdx)}
+                        </span>
+                        <span className="break-words">{option}</span>
+                      </div>
+                      {isSelected && <CheckCircle2 className="size-4 shrink-0 text-[#1d5ca8]" />}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )
+        })}
+
+        {/* Floating / Sticky Mobile Bottom Action Bar */}
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 p-3 backdrop-blur-md sm:static sm:border-none sm:bg-transparent sm:p-0">
+          <div className="mx-auto flex max-w-3xl items-center justify-between gap-3">
+            <div className="text-xs">
+              <span className="font-bold text-slate-800">
+                {answeredCount} من {totalCount}
+              </span>
+              <span className="text-slate-400 mr-1 hidden sm:inline">أسئلة مُجابة</span>
+            </div>
+
+            <button
+              onClick={handleFinalSubmit}
+              disabled={submitting}
+              className="flex flex-1 sm:flex-none items-center justify-center gap-2 rounded-xl bg-[#1d5ca8] px-6 py-2.5 text-xs sm:text-sm font-bold text-white shadow-md active:bg-[#164e93] disabled:opacity-50"
+            >
+              {submitting ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" />
+                  جاري التسليم...
+                </>
+              ) : (
+                <>
+                  <Send className="size-4" />
+                  <span>تسليم الاختبار</span>
+                </>
+              )}
+            </button>
+          </div>
         </div>
       </main>
     </div>

@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useTransition } from 'react'
+import React, { useState } from 'react'
 import {
   Plus,
   FileSpreadsheet,
@@ -8,11 +8,12 @@ import {
   MoveRight,
   Trash2,
   Phone,
+  Copy,
+  Check,
   Key,
   GraduationCap,
   Loader2,
   AlertCircle,
-  Check,
 } from 'lucide-react'
 import { Modal } from '@/components/ui/modal'
 import { generateAccessCode } from '@/lib/access-code'
@@ -51,6 +52,7 @@ export function StudentsView({
 }: Props) {
   const [searchTerm, setSearchTerm] = useState('')
   const [filterGroup, setFilterGroup] = useState<string>('all')
+  const [copiedCodeId, setCopiedCodeId] = useState<string | null>(null)
 
   // Add modal state
   const [addModalOpen, setAddModalOpen] = useState(false)
@@ -83,6 +85,17 @@ export function StudentsView({
     const matchesGroup = filterGroup === 'all' || s.group_id === filterGroup
     return matchesSearch && matchesGroup
   })
+
+  // Copy code helper
+  const handleCopyCode = async (stId: string, code: string) => {
+    try {
+      await navigator.clipboard.writeText(code)
+      setCopiedCodeId(stId)
+      setTimeout(() => setCopiedCodeId(null), 1800)
+    } catch (e) {
+      console.error(e)
+    }
+  }
 
   // Submit Single Student
   const handleAddSubmit = async (e: React.FormEvent) => {
@@ -192,11 +205,11 @@ export function StudentsView({
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       {/* Top Header */}
-      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+      <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
         <div>
-          <h2 className="text-xl font-extrabold text-[#153b68]">قائمة الطلاب</h2>
+          <h2 className="text-lg font-black text-[#153b68] sm:text-xl">قائمة الطلاب</h2>
           <p className="text-xs text-slate-500">
             إدارة بيانات الطلاب، أكواد الدخول للاختبارات، والنقل بين المجموعات
           </p>
@@ -206,9 +219,9 @@ export function StudentsView({
           <button
             onClick={() => setImportModalOpen(true)}
             disabled={!teacherStatus.isActive}
-            className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-xs font-bold text-slate-700 shadow-xs hover:bg-slate-50 disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 shadow-xs hover:bg-slate-50 disabled:opacity-50"
           >
-            <FileSpreadsheet className="size-4 text-emerald-600" />
+            <FileSpreadsheet className="size-3.5 text-emerald-600" />
             <span>استيراد Excel</span>
           </button>
 
@@ -218,16 +231,16 @@ export function StudentsView({
               setAddModalOpen(true)
             }}
             disabled={!teacherStatus.isActive}
-            className="inline-flex items-center gap-2 rounded-xl bg-[#1d5ca8] px-4 py-2.5 text-xs font-bold text-white shadow-md hover:bg-[#164e93] disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 rounded-xl bg-[#1d5ca8] px-3.5 py-2 text-xs font-bold text-white shadow-md hover:bg-[#164e93] disabled:opacity-50"
           >
-            <Plus className="size-4" />
+            <Plus className="size-3.5" />
             <span>إضافة طالب</span>
           </button>
         </div>
       </div>
 
       {/* Filter and Search Bar */}
-      <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-xs sm:flex-row sm:items-center">
+      <div className="flex flex-col gap-2.5 rounded-2xl border border-slate-200 bg-white p-3 shadow-xs sm:flex-row sm:items-center">
         <div className="relative flex-1">
           <Search className="absolute right-3 top-2.5 size-4 text-slate-400" />
           <input
@@ -240,11 +253,11 @@ export function StudentsView({
         </div>
 
         <div className="flex items-center gap-2">
-          <span className="text-xs font-bold text-slate-400">تصفية:</span>
+          <span className="text-xs font-bold text-slate-400 shrink-0">المجموعة:</span>
           <select
             value={filterGroup}
             onChange={(e) => setFilterGroup(e.target.value)}
-            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 outline-hidden"
+            className="w-full sm:w-auto rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 outline-hidden"
           >
             <option value="all">كل المجموعات</option>
             {groups.map((g) => (
@@ -256,8 +269,93 @@ export function StudentsView({
         </div>
       </div>
 
-      {/* Students Table */}
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xs">
+      {/* MOBILE-FIRST CARD VIEW (Visible on phones < 768px) */}
+      <div className="grid gap-2.5 sm:hidden">
+        {filteredStudents.map((st) => (
+          <div
+            key={st.id}
+            className="rounded-2xl border border-slate-200 bg-white p-3.5 shadow-xs"
+          >
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-sm font-bold text-slate-900">{st.full_name}</p>
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-600">
+                    {st.grade}
+                  </span>
+                  {st.group_name && (
+                    <span className="rounded-md bg-blue-50 px-2 py-0.5 text-[11px] font-bold text-[#1d5ca8]">
+                      {st.group_name}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Access Code Pill with One-Tap Copy */}
+              <button
+                onClick={() => handleCopyCode(st.id, st.access_code)}
+                className="flex items-center gap-1 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-mono font-bold text-slate-800 active:scale-95"
+                title="نسخ كود الاختبار"
+              >
+                <Key className="size-3 text-[#1d5ca8]" />
+                <span>{st.access_code}</span>
+                {copiedCodeId === st.id ? (
+                  <Check className="size-3 text-emerald-600" />
+                ) : (
+                  <Copy className="size-3 text-slate-400" />
+                )}
+              </button>
+            </div>
+
+            <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-2.5">
+              <a
+                href={`tel:${st.parent_phone}`}
+                className="inline-flex items-center gap-1 text-xs font-bold text-slate-700 hover:text-[#1d5ca8]"
+                dir="ltr"
+              >
+                <Phone className="size-3 text-emerald-600" />
+                <span>{st.parent_phone}</span>
+              </a>
+
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => {
+                    setSelectedStudentForMove(st)
+                    setTargetGroupId(groups.find((g) => g.id !== st.group_id)?.id || '')
+                    setMoveModalOpen(true)
+                  }}
+                  disabled={!teacherStatus.isActive}
+                  className="rounded-lg p-1.5 text-slate-500 hover:bg-blue-50 hover:text-[#1d5ca8] disabled:opacity-30"
+                  aria-label="نقل"
+                >
+                  <MoveRight className="size-4" />
+                </button>
+                <button
+                  onClick={() => {
+                    if (confirm(`هل أنت متأكد من حذف الطالب "${st.full_name}"؟`)) {
+                      onDeleteStudent(st.id)
+                    }
+                  }}
+                  disabled={!teacherStatus.isActive}
+                  className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-30"
+                  aria-label="حذف"
+                >
+                  <Trash2 className="size-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+        ))}
+
+        {filteredStudents.length === 0 && (
+          <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center text-xs text-slate-400">
+            لا يوجد طلاب يطابقون شروط البحث
+          </div>
+        )}
+      </div>
+
+      {/* DESKTOP TABLE VIEW (Visible on tablets and desktop >= 768px) */}
+      <div className="hidden sm:block overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xs">
         <div className="overflow-x-auto">
           <table className="w-full text-right text-xs">
             <thead className="border-b border-slate-200 bg-slate-50 text-slate-500 font-bold">
@@ -288,9 +386,18 @@ export function StudentsView({
                     {st.parent_phone}
                   </td>
                   <td className="p-3.5">
-                    <span className="font-mono font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded-md">
-                      {st.access_code}
-                    </span>
+                    <button
+                      onClick={() => handleCopyCode(st.id, st.access_code)}
+                      className="inline-flex items-center gap-1 font-mono font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded-md hover:bg-slate-200 active:scale-95"
+                      title="انقر لنسخ الكود"
+                    >
+                      <span>{st.access_code}</span>
+                      {copiedCodeId === st.id ? (
+                        <Check className="size-3 text-emerald-600" />
+                      ) : (
+                        <Copy className="size-3 text-slate-400" />
+                      )}
+                    </button>
                   </td>
                   <td className="p-3.5">
                     <div className="flex items-center justify-center gap-1.5">
@@ -351,7 +458,7 @@ export function StudentsView({
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="mb-1 block text-xs font-bold text-slate-700">هاتف ولي الأمر</label>
               <input
@@ -429,7 +536,7 @@ export function StudentsView({
               المرحلة الحالية: <span className="font-bold">{selectedStudentForMove?.grade}</span>
             </p>
             <p className="text-slate-400">
-              * قاعدة النقل: يجب أن تكون المجموعة المستهدفة من نفس المرحلة الدراسية وتتسع للطالب.
+              * قاعدة النقل: يجب أن تكون المجموعة المستهدفة من نفس المرحلة وتتسع للطالب.
             </p>
           </div>
 
@@ -487,8 +594,7 @@ export function StudentsView({
       >
         <div className="space-y-4">
           <p className="text-xs text-slate-500">
-            يمكنك رفع ملف إكسيل يحتوي على أعمدة (اسم الطالب، هاتف ولي الأمر، الصف). سيقوم النظام تلقائياً
-            بتوليد أكواد دخول شخصية لكل طالب.
+            يمكنك رفع ملف إكسيل يحتوي على أعمدة (اسم الطالب، هاتف ولي الأمر، الصف).
           </p>
 
           <div>

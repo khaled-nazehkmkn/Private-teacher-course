@@ -64,30 +64,30 @@ export function DashboardView({
   const pendingMakeups = makeupRequests.filter((r) => r.status === 'pending')
 
   return (
-    <div className="space-y-7">
+    <div className="space-y-4 sm:space-y-7">
       {/* Welcome Banner */}
-      <div className="flex flex-col justify-between gap-4 rounded-3xl bg-linear-to-r from-[#153b68] to-[#1d5ca8] p-6 text-white shadow-lg sm:flex-row sm:items-center">
+      <div className="flex flex-col justify-between gap-3 rounded-2xl sm:rounded-3xl bg-linear-to-r from-[#153b68] to-[#1d5ca8] p-4 sm:p-6 text-white shadow-lg sm:flex-row sm:items-center">
         <div>
-          <span className="rounded-full bg-white/20 px-3 py-1 text-xs font-bold text-white backdrop-blur-xs">
+          <span className="rounded-full bg-white/20 px-2.5 py-0.5 text-[11px] font-bold text-white backdrop-blur-xs">
             مرحباً بك مجدداً
           </span>
-          <h2 className="mt-2 text-2xl font-black">{teacherName || 'أستاذ المادة'}</h2>
-          <p className="mt-1 text-xs text-blue-100">
+          <h2 className="mt-1.5 text-xl sm:text-2xl font-black">{teacherName || 'أستاذ المادة'}</h2>
+          <p className="mt-0.5 text-xs text-blue-100">
             مدرّس مادة {subject || 'الدروس الخصوصية'} · نظرة عامة على نشاط اليوم
           </p>
         </div>
 
-        <div className="flex flex-wrap gap-2">
+        <div className="flex gap-2">
           <button
             onClick={() => onNavigateTab('المجموعات')}
-            className="inline-flex items-center gap-1.5 rounded-xl bg-white px-4 py-2 text-xs font-bold text-[#153b68] shadow-sm transition hover:bg-blue-50"
+            className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 rounded-xl bg-white px-3.5 py-2 text-xs font-bold text-[#153b68] shadow-sm transition active:scale-95 hover:bg-blue-50"
           >
             <Plus className="size-3.5" />
             <span>مجموعة جديدة</span>
           </button>
           <button
             onClick={() => onNavigateTab('الاختبارات')}
-            className="inline-flex items-center gap-1.5 rounded-xl bg-blue-500/30 px-4 py-2 text-xs font-bold text-white transition hover:bg-blue-500/40"
+            className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 rounded-xl bg-blue-500/30 px-3.5 py-2 text-xs font-bold text-white transition active:scale-95 hover:bg-blue-500/40"
           >
             <BarChart3 className="size-3.5" />
             <span>إنشاء اختبار</span>
@@ -95,60 +95,60 @@ export function DashboardView({
         </div>
       </div>
 
-      {/* Quick Metrics */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs">
+      {/* Quick Metrics 2x2 on Mobile, 4x1 on Desktop */}
+      <div className="grid grid-cols-2 gap-2.5 sm:gap-4 lg:grid-cols-4">
+        <div className="rounded-2xl border border-slate-200 bg-white p-3.5 sm:p-5 shadow-xs">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-xs font-bold text-slate-400">إجمالي الطلاب</p>
-              <p className="mt-2 text-3xl font-black text-slate-800">{students.length}</p>
+              <p className="text-[11px] sm:text-xs font-bold text-slate-400">إجمالي الطلاب</p>
+              <p className="mt-1 text-2xl sm:text-3xl font-black text-slate-800">{students.length}</p>
             </div>
-            <div className="grid size-12 place-items-center rounded-2xl bg-blue-50 text-[#1d5ca8]">
-              <Users className="size-6" />
+            <div className="grid size-9 sm:size-12 place-items-center rounded-2xl bg-blue-50 text-[#1d5ca8]">
+              <Users className="size-4 sm:size-6" />
             </div>
           </div>
-          <p className="mt-3 text-xs text-slate-400">موزعين على {groups.length} مجموعات</p>
+          <p className="mt-2 text-[10px] sm:text-xs text-slate-400">{groups.length} مجموعات</p>
         </div>
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs">
+        <div className="rounded-2xl border border-slate-200 bg-white p-3.5 sm:p-5 shadow-xs">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-xs font-bold text-slate-400">حصص اليوم</p>
-              <p className="mt-2 text-3xl font-black text-slate-800">{todaySessions.length}</p>
+              <p className="text-[11px] sm:text-xs font-bold text-slate-400">حصص اليوم</p>
+              <p className="mt-1 text-2xl sm:text-3xl font-black text-slate-800">{todaySessions.length}</p>
             </div>
-            <div className="grid size-12 place-items-center rounded-2xl bg-amber-50 text-amber-600">
-              <CalendarDays className="size-6" />
+            <div className="grid size-9 sm:size-12 place-items-center rounded-2xl bg-amber-50 text-amber-600">
+              <CalendarDays className="size-4 sm:size-6" />
             </div>
           </div>
-          <p className="mt-3 text-xs text-slate-400">
-            {todaySessions.length > 0 ? 'مجدولة لليوم الحالي' : 'لا توجد حصص مجدولة اليوم'}
+          <p className="mt-2 text-[10px] sm:text-xs text-slate-400">
+            {todaySessions.length > 0 ? 'مجدولة اليوم' : 'لا حصص اليوم'}
           </p>
         </div>
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs">
+        <div className="rounded-2xl border border-slate-200 bg-white p-3.5 sm:p-5 shadow-xs">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-xs font-bold text-slate-400">تنبيهات الغياب</p>
-              <p className="mt-2 text-3xl font-black text-rose-600">{studentsWithAlerts.length}</p>
+              <p className="text-[11px] sm:text-xs font-bold text-slate-400">تنبيهات الغياب</p>
+              <p className="mt-1 text-2xl sm:text-3xl font-black text-rose-600">{studentsWithAlerts.length}</p>
             </div>
-            <div className="grid size-12 place-items-center rounded-2xl bg-rose-50 text-rose-600">
-              <AlertTriangle className="size-6" />
+            <div className="grid size-9 sm:size-12 place-items-center rounded-2xl bg-rose-50 text-rose-600">
+              <AlertTriangle className="size-4 sm:size-6" />
             </div>
           </div>
-          <p className="mt-3 text-xs text-slate-400">طلاب تجاوزوا حد الغياب المسموح</p>
+          <p className="mt-2 text-[10px] sm:text-xs text-slate-400">تجاوزوا حد الغياب</p>
         </div>
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs">
+        <div className="rounded-2xl border border-slate-200 bg-white p-3.5 sm:p-5 shadow-xs">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-xs font-bold text-slate-400">طلبات التعويض</p>
-              <p className="mt-2 text-3xl font-black text-emerald-600">{pendingMakeups.length}</p>
+              <p className="text-[11px] sm:text-xs font-bold text-slate-400">طلبات التعويض</p>
+              <p className="mt-1 text-2xl sm:text-3xl font-black text-emerald-600">{pendingMakeups.length}</p>
             </div>
-            <div className="grid size-12 place-items-center rounded-2xl bg-emerald-50 text-emerald-600">
-              <CalendarClock className="size-6" />
+            <div className="grid size-9 sm:size-12 place-items-center rounded-2xl bg-emerald-50 text-emerald-600">
+              <CalendarClock className="size-4 sm:size-6" />
             </div>
           </div>
-          <p className="mt-3 text-xs text-slate-400">طلب قيد انتظار الموافقة</p>
+          <p className="mt-2 text-[10px] sm:text-xs text-slate-400">قيد الانتظار</p>
         </div>
       </div>
 

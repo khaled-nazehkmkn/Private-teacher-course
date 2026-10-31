@@ -6,9 +6,14 @@ import './globals.css'
 const cairo = Cairo({ subsets: ['arabic'], variable: '--font-cairo' })
 
 export const metadata: Metadata = {
-  title: 'معلّم | لوحة المدرّس',
-  description: 'إدارة المجموعات والطلاب والحضور والاختبارات بسهولة.',
-  generator: 'v0.app',
+  title: 'معلّم | تطبيق إدارة الدروس الخصوصية',
+  description: 'إدارة المجموعات والطلاب والحضور والاختبارات بسهولة للأستاذ والطلاب.',
+  applicationName: 'معلّم',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: 'معلّم',
+  },
   icons: {
     icon: [
       {
@@ -29,8 +34,12 @@ export const metadata: Metadata = {
 }
 
 export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 5,
+  viewportFit: 'cover',
   colorScheme: 'light',
-  themeColor: '#f6f8fb',
+  themeColor: '#153b68',
 }
 
 export default function RootLayout({
@@ -39,8 +48,8 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="ar" dir="rtl">
-      <body className={`${cairo.variable} antialiased`}>
+    <html lang="ar" dir="rtl" className="h-full">
+      <body className={`${cairo.variable} min-h-full font-sans antialiased text-[#17263b] selection:bg-[#1d5ca8] selection:text-white`}>
         {children}
         {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>

@@ -44,8 +44,8 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-[#f6f8fb] p-4 text-[#17263b]">
-      <div className="w-full max-w-md rounded-3xl border border-[#e6ebf2] bg-white p-8 shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
+    <div className="flex min-h-screen flex-col items-center justify-center bg-[#f6f8fb] p-3.5 sm:p-4 text-[#17263b]">
+      <div className="w-full max-w-md rounded-[28px] border border-[#e6ebf2] bg-white p-5 sm:p-8 shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
         <div className="flex flex-col items-center text-center">
           <div className="grid size-14 place-items-center rounded-2xl bg-[#153b68] text-white shadow-md">
             <GraduationCap className="size-8" />

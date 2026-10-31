@@ -9,6 +9,7 @@ import { generateOccurrencesForWeeks } from '@/lib/occurrences'
 // UI Components
 import { Sidebar } from '@/components/Sidebar'
 import { Header } from '@/components/Header'
+import { MobileBottomNav } from '@/components/MobileBottomNav'
 import { TeacherStatusBanner } from '@/components/TeacherStatusBanner'
 import { DashboardView } from '@/components/dashboard/DashboardView'
 import { GroupsView, type GroupItem } from '@/components/groups/GroupsView'
@@ -859,7 +860,7 @@ export default function TeacherAppPage() {
           activeTab={activeTab}
         />
 
-        <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-8">
+        <main className="mx-auto w-full max-w-7xl flex-1 px-3.5 py-4 sm:px-8 sm:py-6 pb-24 lg:pb-8">
           {/* Read-Only Status Banner if suspended or expired */}
           <TeacherStatusBanner status={teacherStatus} />
 
@@ -979,6 +980,16 @@ export default function TeacherAppPage() {
             />
           )}
         </main>
+
+        {/* Phone Bottom Navigation Bar */}
+        <MobileBottomNav
+          activeTab={activeTab}
+          onSelectTab={setActiveTab}
+          onOpenSidebar={() => setSidebarOpen(true)}
+          absenceAlertsCount={
+            Object.values(absencesData).filter((a) => a.dates.length >= 3 || a.consecutive >= 2).length
+          }
+        />
       </div>
     </div>
   )
