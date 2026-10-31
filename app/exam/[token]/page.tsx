@@ -9,6 +9,8 @@ import {
   Send,
   Loader2,
   Award,
+  ZoomIn,
+  X,
 } from 'lucide-react'
 
 interface QuestionItem {
@@ -64,6 +66,8 @@ export default function StudentExamPage({
     score?: number | null
     max_score?: number | null
   } | null>(null)
+
+  const [zoomedImageUrl, setZoomedImageUrl] = useState<string | null>(null)
 
   const timerRef = useRef<NodeJS.Timeout | null>(null)
 
@@ -446,15 +450,24 @@ export default function StudentExamPage({
                 {q.body}
               </p>
 
-              {/* Optional Image */}
+              {/* Optional Image (Compact, readable, with tap to zoom) */}
               {q.image_path && (
-                <div className="mt-2.5 overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={q.image_path}
-                    alt="توضيح السؤال"
-                    className="max-h-60 w-full object-contain"
-                  />
+                <div className="mt-3 flex flex-col items-center">
+                  <div
+                    onClick={() => setZoomedImageUrl(q.image_path || null)}
+                    className="group relative cursor-pointer overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/80 p-2 shadow-xs transition hover:border-[#1d5ca8]/40 hover:shadow-sm"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={q.image_path}
+                      alt="توضيح السؤال"
+                      className="max-h-44 sm:max-h-52 w-auto max-w-full rounded-xl object-contain transition group-hover:scale-[1.02]"
+                    />
+                    <div className="absolute bottom-3 left-3 flex items-center gap-1 rounded-lg bg-slate-900/75 px-2 py-1 text-[10px] font-bold text-white shadow-xs backdrop-blur-xs">
+                      <ZoomIn className="size-3" />
+                      <span>انقر للتكبير</span>
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -525,6 +538,38 @@ export default function StudentExamPage({
           </div>
         </div>
       </main>
+
+      {/* Full-Screen Zoom Modal for Question Images */}
+      {zoomedImageUrl && (
+        <div
+          onClick={() => setZoomedImageUrl(null)}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-3 backdrop-blur-xs"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="relative max-h-[92vh] max-w-4xl overflow-hidden rounded-2xl bg-white p-2.5 shadow-2xl"
+          >
+            <button
+              type="button"
+              onClick={() => setZoomedImageUrl(null)}
+              className="absolute top-4 left-4 z-10 grid size-8 place-items-center rounded-full bg-slate-900/80 text-white shadow-md hover:bg-slate-900"
+            >
+              <X className="size-4" />
+            </button>
+            <div className="max-h-[85vh] overflow-auto">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={zoomedImageUrl}
+                alt="معاينة الصورة بالحجم الكامل"
+                className="mx-auto h-auto max-h-[80vh] w-auto max-w-full rounded-xl object-contain"
+              />
+            </div>
+            <p className="mt-2 text-center text-xs font-semibold text-slate-500">
+              انقر في أي مكان خارج الصورة للإغلاق والعودة للسؤال
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

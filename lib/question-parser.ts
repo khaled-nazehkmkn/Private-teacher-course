@@ -12,6 +12,17 @@ export interface ParsedQuestion {
   image_path?: string
 }
 
+function cleanJsonText(raw: string): string {
+  let cleaned = raw.trim()
+  // Strip markdown code fences if teacher copied from ChatGPT / Gemini directly
+  if (cleaned.startsWith('```json')) {
+    cleaned = cleaned.replace(/^```json\s*/i, '').replace(/\s*```$/i, '')
+  } else if (cleaned.startsWith('```')) {
+    cleaned = cleaned.replace(/^```\s*/i, '').replace(/\s*```$/i, '')
+  }
+  return cleaned.trim()
+}
+
 export function parseJsonQuestions(jsonContent: string): {
   questions: ParsedQuestion[]
   errors: string[]
@@ -20,36 +31,83 @@ export function parseJsonQuestions(jsonContent: string): {
   const parsedQuestions: ParsedQuestion[] = []
 
   try {
-    const data = JSON.parse(jsonContent)
-    const rawList = Array.isArray(data) ? data : data.questions
+    const sanitized = cleanJsonText(jsonContent)
+    const data = JSON.parse(sanitized)
+    const rawList = Array.isArray(data)
+      ? data
+      : Array.isArray(data.questions)
+      ? data.questions
+      : Array.isArray(data.items)
+      ? data.items
+      : data.data
 
     if (!Array.isArray(rawList)) {
-      errors.push('تنسيق ملف JSON غير صحيح. يجب أن يحتوي على مصفوفة questions.')
+      errors.push('تنسيق ملف JSON غير صحيح. يجب أن يحتوي على مصفوفة questions أو مصفوفة أسئلة مباشرة.')
       return { questions: [], errors }
     }
 
     rawList.forEach((q, index) => {
       const qNum = index + 1
-      const body = q.text || q.body
+      const body = q.body || q.text || q.question || q.prompt || q.title
       if (!body || typeof body !== 'string' || !body.trim()) {
         errors.push(`السؤال رقم ${qNum}: نص السؤال غير موجود.`)
         return
       }
 
-      if (!Array.isArray(q.options) || q.options.length < 2) {
+      const rawOptions = q.options || q.choices || q.answers
+      if (!Array.isArray(rawOptions) || rawOptions.length < 2) {
         errors.push(`السؤال رقم ${qNum}: يجب توفير خيارين على الأقل.`)
         return
       }
 
-      const options = q.options.map((opt: unknown) => String(opt).trim())
+      const options = rawOptions.map((opt: unknown) => String(opt).trim())
 
       let correctIndices: number[] = []
-      if (Array.isArray(q.correct)) {
-        correctIndices = q.correct.map((c: unknown) => Number(normalizeArabicDigits(String(c))))
-      } else if (q.correct !== undefined && q.correct !== null) {
-        correctIndices = [Number(normalizeArabicDigits(String(q.correct)))]
-      } else {
-        errors.push(`السؤال رقم ${qNum}: يجب تحديد الإجابة الصحيحة.`)
+      const rawCorrect = q.correct ?? q.correct_answer ?? q.answer ?? q.answer_index
+
+      if (rawCorrect !== undefined && rawCorrect !== null) {
+        const list = Array.isArray(rawCorrect) ? rawCorrect : [rawCorrect]
+        
+        list.forEach((val) => {
+          if (typeof val === 'number') {
+            correctIndices.push(val)
+          } else {
+            const strVal = String(val).trim()
+            const normalizedNum = Number(normalizeArabicDigits(strVal))
+
+            if (!isNaN(normalizedNum)) {
+              correctIndices.push(normalizedNum)
+            } else {
+              // Check letter mappings (A=0, B=1, C=2, D=3, or Arabic أ=0, ب=1, ج=2, د=3)
+              const lower = strVal.toLowerCase()
+              if (lower === 'a' || strVal === 'أ' || strVal === 'ا') correctIndices.push(0)
+              else if (lower === 'b' || strVal === 'ب') correctIndices.push(1)
+              else if (lower === 'c' || strVal === 'ج') correctIndices.push(2)
+              else if (lower === 'd' || strVal === 'د') correctIndices.push(3)
+              else {
+                // Check if string matches an option text exactly
+                const matchedIdx = options.findIndex((opt) => opt === strVal)
+                if (matchedIdx !== -1) {
+                  correctIndices.push(matchedIdx)
+                }
+              }
+            }
+          }
+        })
+      }
+
+      // If correct indices are 1-based (e.g. 1, 2, 3, 4 where 4 === options.length or min >= 1 and max <= options.length without 0)
+      if (correctIndices.length > 0) {
+        const hasZero = correctIndices.some((idx) => idx === 0)
+        const allInRange1Based = correctIndices.every((idx) => idx >= 1 && idx <= options.length)
+        if (!hasZero && allInRange1Based) {
+          correctIndices = correctIndices.map((idx) => idx - 1)
+        }
+      }
+
+      // Fallback to option 0 if empty
+      if (correctIndices.length === 0) {
+        errors.push(`السؤال رقم ${qNum}: لم يتم التعرف على الإجابة الصحيحة.`)
         return
       }
 
@@ -75,7 +133,7 @@ export function parseJsonQuestions(jsonContent: string): {
       })
     })
   } catch (err) {
-    errors.push('فشل قراءة ملف JSON: تأكد من صحة التنسيق البرمجي.')
+    errors.push('فشل قراءة كود JSON: تأكد من إغلاق الأقواس والفواصل بصورة صحيحة.')
   }
 
   return { questions: parsedQuestions, errors }

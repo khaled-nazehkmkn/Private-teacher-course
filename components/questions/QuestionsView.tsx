@@ -12,11 +12,46 @@ import {
   Loader2,
   Search,
   Upload,
+  Download,
+  Copy,
+  Check,
+  ZoomIn,
+  X,
+  Sparkles,
 } from 'lucide-react'
 import { Modal } from '@/components/ui/modal'
 import { compressImage } from '@/lib/image-compress'
 import { parseJsonQuestions, parseExcelQuestions, type ParsedQuestion } from '@/lib/question-parser'
+import { downloadSampleQuestionExcel } from '@/lib/sample-excel'
 import type { TeacherStatus } from '@/lib/teacher-status'
+
+export const AI_PROMPT_TEMPLATE = `أنت معلم خبير ومصمم اختبارات محترف.
+يرجى قراءة الدرس/المستند المرفق وتوليد مجموعة من أسئلة الاختيار من متعدد (MCQ) باللغة العربية بصيغة JSON حصراً، وفق الهيكل البرمجي التالي بدقة تامة ودون كتابة أي نصوص تمهيدية أو شروحات:
+
+{
+  "questions": [
+    {
+      "body": "اكتب نص السؤال هنا بدقة ووضوح؟",
+      "options": [
+        "الخيار الأول",
+        "الخيار الثاني",
+        "الخيار الثالث",
+        "الخيار الرابع"
+      ],
+      "correct": [0],
+      "marks": 1,
+      "grade": "الصف الأول الثانوي",
+      "topic": "اسم الدرس أو الوحدة",
+      "difficulty": "medium"
+    }
+  ]
+}
+
+قواعد هامة:
+1. "options": مصفوفة تحتوي على 4 خيارات منطقية ومتنوعة.
+2. "correct": مصفوفة برقم مؤشر الإجابة الصحيحة (0 للخيار الأول، 1 للثاني، 2 للثالث، 3 للرابع).
+3. "marks": درجة السؤال (رقم صحيح مثلاً 1 أو 2).
+4. "difficulty": مستوى الصعوبة ("easy" أو "medium" أو "hard").`
 
 export interface QuestionBankItem {
   id: string
@@ -69,6 +104,9 @@ export function QuestionsView({
   const [parsedPreview, setParsedPreview] = useState<ParsedQuestion[]>([])
   const [importErrors, setImportErrors] = useState<string[]>([])
   const [importing, setImporting] = useState(false)
+  const [copyPromptSuccess, setCopyPromptSuccess] = useState(false)
+  const [downloadingSample, setDownloadingSample] = useState(false)
+  const [previewImage, setPreviewImage] = useState<string | null>(null)
 
   // Filtered list
   const filteredQuestions = questions.filter((q) => {
@@ -131,6 +169,45 @@ export function QuestionsView({
     const res = parseJsonQuestions(jsonText)
     setParsedPreview(res.questions)
     setImportErrors(res.errors)
+  }
+
+  // Handle JSON File Upload
+  const handleJsonFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (event) => {
+      const text = (event.target?.result as string) || ''
+      setJsonText(text)
+      const res = parseJsonQuestions(text)
+      setParsedPreview(res.questions)
+      setImportErrors(res.errors)
+    }
+    reader.readAsText(file)
+  }
+
+  // Copy AI Prompt
+  const handleCopyPrompt = async () => {
+    try {
+      await navigator.clipboard.writeText(AI_PROMPT_TEMPLATE)
+      setCopyPromptSuccess(true)
+      setTimeout(() => setCopyPromptSuccess(false), 3000)
+    } catch {
+      alert('تعذر النسخ التلقائي للحافظة')
+    }
+  }
+
+  // Download Sample Excel
+  const handleDownloadSampleExcel = async () => {
+    setDownloadingSample(true)
+    try {
+      await downloadSampleQuestionExcel()
+    } catch (err) {
+      console.error('Error downloading excel sample:', err)
+      alert('حدث خطأ أثناء تحميل ملف النموذج')
+    } finally {
+      setDownloadingSample(false)
+    }
   }
 
   // Handle Excel File
@@ -284,11 +361,24 @@ export function QuestionsView({
               {/* Question Text */}
               <p className="mt-3 text-sm font-bold text-slate-800 leading-relaxed">{q.body}</p>
 
-              {/* Optional image preview */}
+              {/* Optional image preview (Compact, centered, click to zoom) */}
               {q.image_path && (
-                <div className="mt-2.5 overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={q.image_path} alt="سؤال" className="max-h-40 w-full object-contain" />
+                <div className="mt-2.5 flex justify-center">
+                  <div
+                    onClick={() => setPreviewImage(q.image_path || null)}
+                    className="group relative cursor-pointer overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-1.5 shadow-2xs hover:border-[#1d5ca8]/40"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={q.image_path}
+                      alt="سؤال"
+                      className="max-h-32 sm:max-h-36 w-auto max-w-full rounded-lg object-contain"
+                    />
+                    <div className="absolute bottom-2 left-2 flex items-center gap-1 rounded-md bg-slate-900/70 px-1.5 py-0.5 text-[9px] font-bold text-white backdrop-blur-xs opacity-0 group-hover:opacity-100 transition">
+                      <ZoomIn className="size-2.5" />
+                      <span>تكبير</span>
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -497,42 +587,109 @@ export function QuestionsView({
           </div>
 
           {importMode === 'json' ? (
-            <div>
-              <label className="mb-1 block text-xs font-bold text-slate-700">
-                الصق كود JSON هنا (وفق المعيار المحدد):
-              </label>
-              <textarea
-                rows={6}
-                value={jsonText}
-                onChange={(e) => setJsonText(e.target.value)}
-                placeholder='{ "questions": [ { "body": "...", "options": ["..."], "correct": [0], "marks": 2 } ] }'
-                className="w-full rounded-xl border border-slate-200 p-2.5 font-mono text-xs outline-hidden focus:border-[#1d5ca8]"
-                dir="ltr"
-              />
-              <button
-                type="button"
-                onClick={handleParseJson}
-                className="mt-2 rounded-xl bg-slate-800 px-4 py-1.5 text-xs font-bold text-white hover:bg-slate-900"
-              >
-                معاينة الأسئلة
-              </button>
+            <div className="space-y-3">
+              {/* AI Prompt Generator Card */}
+              <div className="rounded-2xl border border-blue-200 bg-blue-50/70 p-3.5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="size-4 shrink-0 text-[#1d5ca8]" />
+                    <p className="text-xs font-bold text-blue-950">
+                      توليد الأسئلة عبر الذكاء الاصطناعي (ChatGPT / Gemini):
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleCopyPrompt}
+                    className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl bg-[#1d5ca8] px-3.5 py-1.5 text-xs font-bold text-white shadow-xs hover:bg-[#164e93] active:scale-95"
+                  >
+                    {copyPromptSuccess ? (
+                      <Check className="size-3.5 text-emerald-300" />
+                    ) : (
+                      <Copy className="size-3.5" />
+                    )}
+                    <span>{copyPromptSuccess ? 'تم نسخ البرومبت بنجاح!' : 'نسخ برومبت الذكاء الاصطناعي'}</span>
+                  </button>
+                </div>
+                <p className="mt-1.5 text-[11px] text-blue-800 leading-relaxed">
+                  اضغط على الزر لنسخ البرومبت الجاهز، ثم الصقه في ChatGPT أو Gemini مع درسك أو ملزمتك، وسيقوم الذكاء الاصطناعي بإنشاء الأسئلة بتنسيق JSON المطلوب فوراً لتلصقه هنا.
+                </p>
+              </div>
+
+              <div>
+                <div className="mb-1.5 flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-700">
+                    الصق كود JSON هنا:
+                  </label>
+                  <label className="inline-flex cursor-pointer items-center gap-1 text-xs font-bold text-[#1d5ca8] hover:underline">
+                    <Upload className="size-3" />
+                    <span>أو اختر ملف .json من جهازك</span>
+                    <input
+                      type="file"
+                      accept=".json,application/json"
+                      onChange={handleJsonFileUpload}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+                <textarea
+                  rows={6}
+                  value={jsonText}
+                  onChange={(e) => setJsonText(e.target.value)}
+                  placeholder='{ "questions": [ { "body": "سؤال...", "options": ["أ", "ب", "ج", "د"], "correct": [0], "marks": 1 } ] }'
+                  className="w-full rounded-xl border border-slate-200 p-2.5 font-mono text-xs outline-hidden focus:border-[#1d5ca8]"
+                  dir="ltr"
+                />
+                <button
+                  type="button"
+                  onClick={handleParseJson}
+                  className="mt-2 rounded-xl bg-slate-800 px-4 py-2 text-xs font-bold text-white hover:bg-slate-900 active:scale-95"
+                >
+                  معاينة والتحقق من الأسئلة
+                </button>
+              </div>
             </div>
           ) : (
-            <div className="rounded-2xl border-2 border-dashed border-slate-300 p-6 text-center">
-              <input
-                type="file"
-                accept=".xlsx,.xls,.csv"
-                onChange={handleExcelUpload}
-                id="excelQuestionInput"
-                className="hidden"
-              />
-              <label htmlFor="excelQuestionInput" className="cursor-pointer">
-                <FileSpreadsheet className="mx-auto size-8 text-emerald-600" />
-                <p className="mt-2 text-xs font-bold text-slate-700">اختر ملف Excel</p>
-                <p className="text-[11px] text-slate-400">
-                  يجب أن يحتوي على أعمدة: نص السؤال، الخيار 1، الخيار 2، الإجابة الصحيحة
-                </p>
-              </label>
+            <div className="space-y-3">
+              {/* Excel Sample Download Banner */}
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 rounded-2xl border border-emerald-200 bg-emerald-50/70 p-3.5 text-xs text-emerald-950">
+                <div className="flex items-center gap-2">
+                  <FileSpreadsheet className="size-5 shrink-0 text-emerald-600" />
+                  <div>
+                    <p className="font-bold">هل تحتاج إلى نموذج جاهز لتعبئة الأسئلة؟</p>
+                    <p className="text-[11px] text-emerald-700">حمّل النموذج الجاهز واملأ أسئلتك ثم أعد رفعه هنا</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  disabled={downloadingSample}
+                  onClick={handleDownloadSampleExcel}
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 py-2 font-bold text-white shadow-xs hover:bg-emerald-700 disabled:opacity-50 active:scale-95"
+                >
+                  {downloadingSample ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <Download className="size-3.5" />
+                  )}
+                  <span>تحميل نموذج Excel التجريبي</span>
+                </button>
+              </div>
+
+              <div className="rounded-2xl border-2 border-dashed border-slate-300 p-6 text-center hover:bg-slate-50 transition">
+                <input
+                  type="file"
+                  accept=".xlsx,.xls,.csv"
+                  onChange={handleExcelUpload}
+                  id="excelQuestionInput"
+                  className="hidden"
+                />
+                <label htmlFor="excelQuestionInput" className="cursor-pointer">
+                  <FileSpreadsheet className="mx-auto size-9 text-emerald-600" />
+                  <p className="mt-2 text-xs font-bold text-slate-700">اختر ملف Excel من جهازك</p>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    يدعم ملفات (.xlsx, .xls) المحتوية على أعمدة: نص السؤال، الخيارات، والإجابة الصحيحة
+                  </p>
+                </label>
+              </div>
             </div>
           )}
 
@@ -584,6 +741,35 @@ export function QuestionsView({
           )}
         </div>
       </Modal>
+
+      {/* Full-Screen Preview Modal for Question Images */}
+      {previewImage && (
+        <div
+          onClick={() => setPreviewImage(null)}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4 backdrop-blur-xs"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="relative max-h-[92vh] max-w-3xl overflow-hidden rounded-2xl bg-white p-2.5 shadow-2xl"
+          >
+            <button
+              type="button"
+              onClick={() => setPreviewImage(null)}
+              className="absolute top-4 left-4 z-10 grid size-8 place-items-center rounded-full bg-slate-900/80 text-white shadow-md hover:bg-slate-900"
+            >
+              <X className="size-4" />
+            </button>
+            <div className="max-h-[82vh] overflow-auto">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={previewImage}
+                alt="معاينة الصورة"
+                className="mx-auto h-auto max-h-[80vh] w-auto max-w-full rounded-xl object-contain"
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
