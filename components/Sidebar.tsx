@@ -1,6 +1,6 @@
 'use client'
 
-import React from 'react'
+import React, { useState } from 'react'
 import {
   GraduationCap,
   LayoutDashboard,
@@ -15,7 +15,9 @@ import {
   ShieldAlert,
   LogOut,
   X,
+  KeyRound,
 } from 'lucide-react'
+import { ChangePasswordModal } from '@/components/profile/ChangePasswordModal'
 
 export interface NavItem {
   id: string
@@ -50,6 +52,8 @@ export function Sidebar({
   absenceAlertsCount = 0,
   pendingMakeupsCount = 0,
 }: SidebarProps) {
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false)
+
   const navItems: NavItem[] = [
     { id: 'الرئيسية', label: 'الرئيسية', icon: LayoutDashboard },
     { id: 'المجموعات', label: 'المجموعات', icon: Users },
@@ -171,16 +175,31 @@ export function Sidebar({
               </div>
             </div>
 
-            <button
-              onClick={onLogout}
-              className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600 transition"
-              title="تسجيل الخروج"
-            >
-              <LogOut className="size-4" />
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setChangePasswordOpen(true)}
+                className="rounded-lg p-1.5 text-slate-400 hover:bg-blue-50 hover:text-[#1d5ca8] transition"
+                title="تغيير كلمة المرور"
+              >
+                <KeyRound className="size-4" />
+              </button>
+              <button
+                onClick={onLogout}
+                className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600 transition"
+                title="تسجيل الخروج"
+              >
+                <LogOut className="size-4" />
+              </button>
+            </div>
           </div>
         </div>
       </aside>
+
+      <ChangePasswordModal
+        isOpen={changePasswordOpen}
+        onClose={() => setChangePasswordOpen(false)}
+      />
     </>
   )
 }

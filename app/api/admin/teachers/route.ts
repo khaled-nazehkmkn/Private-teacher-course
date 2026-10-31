@@ -2,6 +2,87 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getAdminClient } from '@/lib/supabase/admin'
 
+export async function GET() {
+  try {
+    // 1. Verify caller is an authenticated admin
+    const supabaseUser = await createClient()
+    const {
+      data: { user },
+      error: authError,
+    } = await supabaseUser.auth.getUser()
+
+    if (authError || !user) {
+      return NextResponse.json({ error: 'غير مصرح لك بتنفيذ هذا الإجراء' }, { status: 401 })
+    }
+
+    const adminClient = getAdminClient()
+
+    const { data: callerTeacher, error: checkAdminError } = await adminClient
+      .from('teachers')
+      .select('is_admin')
+      .eq('id', user.id)
+      .single()
+
+    if (checkAdminError || !callerTeacher?.is_admin) {
+      return NextResponse.json({ error: 'صلاحيات المشرف فقط مطلوبة' }, { status: 403 })
+    }
+
+    // 2. Fetch all teachers
+    const { data: teachers, error: tErr } = await adminClient
+      .from('teachers')
+      .select('*')
+      .order('created_at', { ascending: false })
+
+    if (tErr) {
+      console.error('[Admin] Error fetching teachers:', tErr)
+      return NextResponse.json({ error: 'فشل جلب بيانات المعلمين' }, { status: 500 })
+    }
+
+    // 3. Fetch Auth users for emails
+    const { data: authData } = await adminClient.auth.admin.listUsers()
+    const authMap = new Map((authData?.users || []).map((u) => [u.id, u]))
+
+    // 4. Fetch groups and students to aggregate counts
+    const { data: groups } = await adminClient.from('groups').select('id, teacher_id')
+    const { data: students } = await adminClient.from('students').select('id, teacher_id')
+
+    const groupCounts: Record<string, number> = {}
+    ;(groups || []).forEach((g) => {
+      if (g.teacher_id) {
+        groupCounts[g.teacher_id] = (groupCounts[g.teacher_id] || 0) + 1
+      }
+    })
+
+    const studentCounts: Record<string, number> = {}
+    ;(students || []).forEach((s) => {
+      if (s.teacher_id) {
+        studentCounts[s.teacher_id] = (studentCounts[s.teacher_id] || 0) + 1
+      }
+    })
+
+    const enriched = (teachers || []).map((t) => {
+      const authUser = authMap.get(t.id)
+      return {
+        ...t,
+        email: authUser?.email || null,
+        total_groups: groupCounts[t.id] || 0,
+        total_students: studentCounts[t.id] || 0,
+      }
+    })
+
+    return NextResponse.json({
+      success: true,
+      teachers: enriched,
+    })
+  } catch (error) {
+    console.error('[Admin] Unhandled exception in GET /api/admin/teachers:', error)
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'حدث خطأ غير متوقع' },
+      { status: 500 }
+    )
+  }
+}
+
 export async function POST(request: Request) {
   try {
     // 1. Verify caller is an authenticated admin

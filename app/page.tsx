@@ -355,12 +355,16 @@ export default function TeacherAppPage() {
 
         // Fetch Admin Teachers if Admin
         if (tRow?.is_admin) {
-          const { data: allTeachers } = await supabase
-            .from('teachers')
-            .select('*')
-            .order('created_at', { ascending: false })
-          if (allTeachers) {
-            setAdminTeachers(allTeachers as AdminTeacherItem[])
+          try {
+            const adminRes = await fetch('/api/admin/teachers')
+            if (adminRes.ok) {
+              const resJson = await adminRes.json()
+              if (resJson.teachers) {
+                setAdminTeachers(resJson.teachers as AdminTeacherItem[])
+              }
+            }
+          } catch (e) {
+            console.error('[Admin] Error fetching enriched teachers via API:', e)
           }
         }
       }

@@ -43,6 +43,16 @@ export async function PATCH(
     if (subject !== undefined) updateData.subject = subject || null
     if (typeof is_admin === 'boolean') updateData.is_admin = is_admin
 
+    if (full_name) {
+      try {
+        await adminClient.auth.admin.updateUserById(teacherId, {
+          user_metadata: { full_name },
+        })
+      } catch (err) {
+        console.error('[Admin] Error syncing user metadata:', err)
+      }
+    }
+
     const { data: updatedTeacher, error: updateError } = await adminClient
       .from('teachers')
       .update(updateData)
