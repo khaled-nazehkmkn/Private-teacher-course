@@ -166,3 +166,23 @@
     font-family: var(--font-cairo), Arial, sans-serif;
   }
 }
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #printable-exam-sheet,
+  #printable-exam-sheet * {
+    visibility: visible;
+  }
+  #printable-exam-sheet {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    margin: 0;
+    padding: 15px;
+    border: none !important;
+    box-shadow: none !important;
+  }
+}

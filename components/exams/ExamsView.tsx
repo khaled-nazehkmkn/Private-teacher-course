@@ -789,47 +789,35 @@ export function ExamsView({
               id="printable-exam-sheet"
               className="rounded-2xl border border-slate-300 bg-white p-6 sm:p-10 text-slate-900 shadow-sm print:m-0 print:border-none print:p-0 print:shadow-none"
             >
-              {/* Official Exam Header */}
+              {/* Exam Header */}
               <div className="border-b-2 border-slate-800 pb-4">
-                <div className="flex items-start justify-between">
-                  <div className="text-right text-xs font-bold space-y-1">
-                    <p>جمهورية مصر العربية</p>
-                    <p>إدارة التعليم الخاص والتفوق</p>
-                    <p>المعلم: {teacherName}</p>
-                  </div>
-
-                  <div className="text-center">
-                    <h2 className="text-lg sm:text-xl font-black text-slate-900">
-                      {printExam.title}
-                    </h2>
-                    <p className="mt-1 text-xs font-bold text-slate-600">
-                      {printExam.grade || 'المرحلة الدراسية'} • العام الدراسي ٢٠٢٥ / ٢٠٢٦
+                <div className="flex items-center justify-between gap-4">
+                  <div className="text-right">
+                    <p className="text-sm font-black text-slate-900">
+                      المعلم: <span className="text-[#1d5ca8]">{teacherName || 'الأستاذ'}</span>
                     </p>
                   </div>
 
-                  <div className="text-left text-xs font-bold space-y-1" dir="ltr">
-                    <p>الزمن: {printExam.duration_min} دقيقة</p>
-                    <p>الدرجة الكلية: {printExam.question_ids.length * 2} درجة</p>
+                  <div className="text-center flex-1">
+                    <h2 className="text-lg sm:text-2xl font-black text-slate-900">
+                      {printExam.title}
+                    </h2>
+                  </div>
+
+                  <div className="text-left text-xs font-bold text-slate-500 shrink-0" dir="ltr">
+                    <p>{printExam.duration_min} دقيقة</p>
                   </div>
                 </div>
 
                 {/* Student Details Box */}
-                <div className="mt-4 grid grid-cols-2 gap-3 rounded-xl border border-slate-400 p-3 text-xs font-bold">
-                  <div>
+                <div className="mt-4 rounded-xl border border-slate-400 p-3 text-xs sm:text-sm font-bold flex items-center justify-between gap-4">
+                  <div className="flex-1">
                     <span>اسم الطالب: </span>
-                    <span className="text-slate-400 font-normal">....................................................................</span>
+                    <span className="text-slate-400 font-normal">........................................................................................................</span>
                   </div>
-                  <div>
-                    <span>المجموعة: </span>
-                    <span className="text-slate-400 font-normal">....................................................</span>
-                  </div>
-                  <div>
-                    <span>تاريخ الاختبار: </span>
-                    <span className="text-slate-400 font-normal">...... / ...... / ٢٠٢...</span>
-                  </div>
-                  <div className="flex items-center justify-end gap-1">
-                    <span>الدرجة المستحقة: </span>
-                    <span className="inline-block w-16 border-b border-black text-center">/</span>
+                  <div className="shrink-0 flex items-center gap-1.5 pr-4 border-r border-slate-300">
+                    <span>الدرجة: </span>
+                    <span className="inline-block w-14 border-b border-black text-center font-normal">/</span>
                   </div>
                 </div>
               </div>
@@ -1021,6 +1009,16 @@ export function ExamsView({
                     {/* Essay Case */}
                     {isEssay && (
                       <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-3.5 text-xs space-y-3">
+                        {/* Model Answer (if provided by teacher) */}
+                        {(q.model_answer || (Array.isArray(q.correct) && q.correct.length > 0 && typeof q.correct[0] === 'string')) && (
+                          <div className="rounded-lg bg-emerald-50/70 p-2.5 border border-emerald-200 text-xs">
+                            <span className="font-bold text-emerald-900">💡 نموذج الإجابة للمقارنة: </span>
+                            <span className="text-emerald-800 font-medium">
+                              {q.model_answer || q.correct[0]}
+                            </span>
+                          </div>
+                        )}
+
                         {/* Written Text Answer */}
                         <div>
                           <p className="font-bold text-slate-800">إجابة الطالب المكتوبة (نصياً):</p>

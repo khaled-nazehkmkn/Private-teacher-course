@@ -279,7 +279,12 @@ export default function TeacherAppPage() {
               grade: q.grade,
               topic: q.topic,
               difficulty: q.difficulty,
-              model_answer: q.model_answer,
+              model_answer:
+                q.model_answer ||
+                (q.type === 'essay' && Array.isArray(q.correct) && q.correct.length > 0
+                  ? q.correct[0]
+                  : null) ||
+                null,
             }))
           )
         }
@@ -823,19 +828,29 @@ export default function TeacherAppPage() {
     } = await supabase.auth.getUser()
 
     if (user) {
-      await supabase.from('questions').insert({
+      const correctVal =
+        qData.type === 'essay'
+          ? (qData.model_answer ? [qData.model_answer] : [])
+          : (qData.correct || [0])
+
+      const { error } = await supabase.from('questions').insert({
         teacher_id: user.id,
         body: qData.body,
         type: qData.type || 'mcq',
         options: (qData.options || []) as any,
-        correct: (qData.correct || []) as any,
+        correct: correctVal as any,
         marks: qData.marks,
         grade: qData.grade,
         topic: qData.topic,
         difficulty: qData.difficulty,
         image_path: qData.image_path,
-        model_answer: qData.model_answer || null,
       })
+
+      if (error) {
+        console.error('[AddQuestion] Supabase insert error:', error)
+        throw new Error(error.message || 'فشل حفظ السؤال في قاعدة البيانات')
+      }
+
       await loadData()
       return
     }
@@ -857,21 +872,32 @@ export default function TeacherAppPage() {
     } = await supabase.auth.getUser()
 
     if (user) {
-      await supabase.from('questions').insert(
-        qList.map((q) => ({
+      const records = qList.map((q) => {
+        const correctVal =
+          q.type === 'essay'
+            ? (q.model_answer ? [q.model_answer] : [])
+            : (q.correct || [0])
+
+        return {
           teacher_id: user.id,
           body: q.body,
           type: q.type || 'mcq',
           options: (q.options || []) as any,
-          correct: (q.correct || []) as any,
+          correct: correctVal as any,
           marks: q.marks,
           grade: q.grade,
           topic: q.topic,
           difficulty: q.difficulty,
           image_path: q.image_path,
-          model_answer: q.model_answer || null,
-        }))
-      )
+        }
+      })
+
+      const { error } = await supabase.from('questions').insert(records)
+      if (error) {
+        console.error('[BatchAddQuestions] Supabase error:', error)
+        throw new Error(error.message || 'فشل استيراد الأسئلة في قاعدة البيانات')
+      }
+
       await loadData()
       return
     }
