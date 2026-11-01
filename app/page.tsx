@@ -142,6 +142,18 @@ export default function TeacherAppPage() {
   const [reminders, setReminders] = useState<ReminderItem[]>([])
   const [messageLogs, setMessageLogs] = useState<MessageLogItem[]>([])
   const [adminTeachers, setAdminTeachers] = useState<AdminTeacherItem[]>([])
+  const [isNewYearPrep, setIsNewYearPrep] = useState(false)
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('is_new_year_prep')
+      if (stored === 'true') {
+        setIsNewYearPrep(true)
+      }
+    }
+  }, [])
+
+  const unassignedStudentsCount = students.filter((s) => !s.group_id).length
 
   // Load all data from Supabase
   const loadData = useCallback(async () => {
@@ -701,13 +713,27 @@ export default function TeacherAppPage() {
 
   const handleMoveStudent = async (studentId: string, newGroupId: string) => {
     const supabase = createClient()
-    await supabase.from('students').update({ group_id: newGroupId }).eq('id', studentId)
-
     const targetGroup = groups.find((g) => g.id === newGroupId)
+    const newGrade = targetGroup?.grade
+
+    if (newGrade) {
+      await supabase
+        .from('students')
+        .update({ group_id: newGroupId, grade: newGrade })
+        .eq('id', studentId)
+    } else {
+      await supabase.from('students').update({ group_id: newGroupId }).eq('id', studentId)
+    }
+
     setStudents((prev) =>
       prev.map((s) =>
         s.id === studentId
-          ? { ...s, group_id: newGroupId, group_name: targetGroup?.name }
+          ? {
+              ...s,
+              group_id: newGroupId,
+              group_name: targetGroup?.name,
+              grade: newGrade || s.grade,
+            }
           : s
       )
     )
@@ -717,6 +743,77 @@ export default function TeacherAppPage() {
     const supabase = createClient()
     await supabase.from('students').delete().eq('id', studentId)
     setStudents((prev) => prev.filter((s) => s.id !== studentId))
+  }
+
+  // Academic Year Handlers
+  const handlePrepareNewYear = async () => {
+    try {
+      const supabase = createClient()
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+
+      if (user) {
+        const res = await fetch('/api/teacher/academic-year', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'prepare_new_year' }),
+        })
+        if (!res.ok) {
+          const err = await res.json()
+          throw new Error(err.error || 'فشل التحضير للعام الدراسي الجديد')
+        }
+        setIsNewYearPrep(true)
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('is_new_year_prep', 'true')
+        }
+        await loadData()
+        return
+      }
+
+      // Local state fallback
+      setGroups([])
+      setOccurrences([])
+      setStudents((prev) => prev.map((s) => ({ ...s, group_id: null, group_name: undefined })))
+      setIsNewYearPrep(true)
+    } catch (err: any) {
+      console.error('[PrepareNewYear] Error:', err)
+      throw err
+    }
+  }
+
+  const handleFinalizeNewYear = async () => {
+    try {
+      const supabase = createClient()
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+
+      if (user) {
+        const res = await fetch('/api/teacher/academic-year', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'finalize_new_year' }),
+        })
+        if (!res.ok) {
+          const err = await res.json()
+          throw new Error(err.error || 'فشل بدء العام الجديد وحذف الطلاب')
+        }
+        setIsNewYearPrep(false)
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('is_new_year_prep')
+        }
+        await loadData()
+        return
+      }
+
+      // Local state fallback
+      setStudents((prev) => prev.filter((s) => s.group_id !== null))
+      setIsNewYearPrep(false)
+    } catch (err: any) {
+      console.error('[FinalizeNewYear] Error:', err)
+      throw err
+    }
   }
 
   // Attendance Handlers
@@ -1243,6 +1340,14 @@ export default function TeacherAppPage() {
               onUpdateGroup={handleUpdateGroup}
               onDeleteGroup={handleDeleteGroup}
               teacherStatus={teacherStatus}
+              onPrepareNewYear={handlePrepareNewYear}
+              onFinalizeNewYear={handleFinalizeNewYear}
+              unassignedStudentsCount={unassignedStudentsCount}
+              totalStudentsCount={students.length}
+              isNewYearPrep={isNewYearPrep}
+              onNavigateToStudents={(filter) => {
+                setActiveTab('الطلاب')
+              }}
             />
           )}
 
@@ -1255,6 +1360,8 @@ export default function TeacherAppPage() {
               onMoveStudent={handleMoveStudent}
               onDeleteStudent={handleDeleteStudent}
               teacherStatus={teacherStatus}
+              onFinalizeNewYear={handleFinalizeNewYear}
+              isNewYearPrep={isNewYearPrep}
             />
           )}
 

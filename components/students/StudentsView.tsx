@@ -14,6 +14,9 @@ import {
   GraduationCap,
   Loader2,
   AlertCircle,
+  Sparkles,
+  AlertTriangle,
+  CheckCircle2,
 } from 'lucide-react'
 import { Modal } from '@/components/ui/modal'
 import { generateAccessCode } from '@/lib/access-code'
@@ -39,6 +42,8 @@ interface Props {
   onMoveStudent: (studentId: string, newGroupId: string) => Promise<void>
   onDeleteStudent: (studentId: string) => Promise<void>
   teacherStatus: TeacherStatus
+  onFinalizeNewYear?: () => Promise<void>
+  isNewYearPrep?: boolean
 }
 
 export function StudentsView({
@@ -49,10 +54,19 @@ export function StudentsView({
   onMoveStudent,
   onDeleteStudent,
   teacherStatus,
+  onFinalizeNewYear,
+  isNewYearPrep = false,
 }: Props) {
   const [searchTerm, setSearchTerm] = useState('')
   const [filterGroup, setFilterGroup] = useState<string>('all')
   const [copiedCodeId, setCopiedCodeId] = useState<string | null>(null)
+
+  // Unassigned students count
+  const unassignedCount = students.filter((s) => !s.group_id).length
+
+  // Finalize New Year modal state
+  const [finalizeModalOpen, setFinalizeModalOpen] = useState(false)
+  const [loadingFinalize, setLoadingFinalize] = useState(false)
 
   // Add modal state
   const [addModalOpen, setAddModalOpen] = useState(false)
@@ -82,7 +96,12 @@ export function StudentsView({
       s.full_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       s.parent_phone.includes(searchTerm) ||
       s.access_code.includes(searchTerm)
-    const matchesGroup = filterGroup === 'all' || s.group_id === filterGroup
+    const matchesGroup =
+      filterGroup === 'all'
+        ? true
+        : filterGroup === 'unassigned'
+        ? !s.group_id
+        : s.group_id === filterGroup
     return matchesSearch && matchesGroup
   })
 
@@ -169,7 +188,7 @@ export function StudentsView({
     }
   }
 
-  // Execute Move Student
+  // Execute Move / Assign Student
   const handleMoveSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!selectedStudentForMove || !targetGroupId) return
@@ -178,13 +197,7 @@ export function StudentsView({
     const targetGroup = groups.find((g) => g.id === targetGroupId)
     if (!targetGroup) return
 
-    // 1. Same grade rule check
-    if (targetGroup.grade !== selectedStudentForMove.grade) {
-      setMoveError(`لا يمكن النقل: مجموعة الهدف من (${targetGroup.grade}) بينما الطالب (${selectedStudentForMove.grade})`)
-      return
-    }
-
-    // 2. Capacity check
+    // Capacity check
     const currentOccupancy = targetGroup.studentCount || 0
     if (currentOccupancy >= targetGroup.capacity) {
       setMoveError(`لا يمكن النقل: مجموعة الهدف مكتملة السعة (${currentOccupancy} من ${targetGroup.capacity})`)
@@ -198,14 +211,81 @@ export function StudentsView({
       setSelectedStudentForMove(null)
     } catch (err) {
       console.error(err)
-      setMoveError('فشل نقل الطالب')
+      setMoveError('فشل نقل / تسكين الطالب')
     } finally {
       setLoadingMove(false)
     }
   }
 
+  const handleConfirmFinalize = async () => {
+    if (!onFinalizeNewYear) return
+    setLoadingFinalize(true)
+    try {
+      await onFinalizeNewYear()
+      setFinalizeModalOpen(false)
+    } catch (err: any) {
+      console.error(err)
+      alert(err?.message || 'فشل بدء العام الجديد وحذف الطلاب')
+    } finally {
+      setLoadingFinalize(false)
+    }
+  }
+
   return (
     <div className="space-y-4 sm:space-y-6">
+      {/* New Year Preparation Banner */}
+      {(isNewYearPrep || unassignedCount > 0) && (
+        <div className="rounded-2xl border-2 border-amber-300 bg-linear-to-r from-amber-50 to-orange-50 p-4 sm:p-5 shadow-xs">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className="rounded-xl bg-amber-500/15 p-2.5 text-amber-700 shrink-0">
+                <GraduationCap className="size-6" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm sm:text-base font-black text-amber-950">
+                    مرحلة إعداد العام الدراسي الجديد
+                  </h3>
+                  <span className="rounded-full bg-amber-200 px-2.5 py-0.5 text-xs font-black text-amber-800">
+                    {unassignedCount} طالب بانتظار التسكين
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-amber-900/80 leading-relaxed">
+                  لديك <strong>{unassignedCount}</strong> طالب بدون مجموعة. قم بتسكين الطلاب المستمرين بالضغط على "تسكين في مجموعة".
+                  وعندما تنتهي وتصبح جاهزاً، اضغط على زر <strong>بدء العام وحذف غير المسجلين</strong>.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 self-end sm:self-center shrink-0">
+              <button
+                type="button"
+                onClick={() => setFilterGroup('unassigned')}
+                className={`inline-flex items-center gap-1.5 rounded-xl border px-3.5 py-2 text-xs font-bold transition ${
+                  filterGroup === 'unassigned'
+                    ? 'border-amber-500 bg-amber-500 text-white shadow-xs'
+                    : 'border-amber-300 bg-white text-amber-900 hover:bg-amber-100 shadow-2xs'
+                }`}
+              >
+                <span>عرض الطلاب غير المسكنين ({unassignedCount})</span>
+              </button>
+
+              {onFinalizeNewYear && (
+                <button
+                  type="button"
+                  onClick={() => setFinalizeModalOpen(true)}
+                  disabled={!teacherStatus.isActive}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-amber-600 px-4 py-2 text-xs font-black text-white shadow-sm hover:bg-amber-700 transition disabled:opacity-50"
+                >
+                  <CheckCircle2 className="size-3.5" />
+                  <span>بدء العام وحذف غير المسجلين ({unassignedCount})</span>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Top Header */}
       <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
         <div>
@@ -259,7 +339,10 @@ export function StudentsView({
             onChange={(e) => setFilterGroup(e.target.value)}
             className="w-full sm:w-auto rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 outline-hidden"
           >
-            <option value="all">كل المجموعات</option>
+            <option value="all">كل الطلاب ({students.length})</option>
+            {unassignedCount > 0 && (
+              <option value="unassigned">⚠️ طلاب بدون مجموعة ({unassignedCount})</option>
+            )}
             {groups.map((g) => (
               <option key={g.id} value={g.id}>
                 {g.name} ({g.grade})
@@ -283,9 +366,13 @@ export function StudentsView({
                   <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-600">
                     {st.grade}
                   </span>
-                  {st.group_name && (
+                  {st.group_name ? (
                     <span className="rounded-md bg-blue-50 px-2 py-0.5 text-[11px] font-bold text-[#1d5ca8]">
                       {st.group_name}
+                    </span>
+                  ) : (
+                    <span className="rounded-md bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-800">
+                      بدون مجموعة
                     </span>
                   )}
                 </div>
@@ -307,29 +394,44 @@ export function StudentsView({
               </button>
             </div>
 
-            <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-2.5">
-              <a
-                href={`tel:${st.parent_phone}`}
-                className="inline-flex items-center gap-1 text-xs font-bold text-slate-700 hover:text-[#1d5ca8]"
-                dir="ltr"
-              >
-                <Phone className="size-3 text-emerald-600" />
-                <span>{st.parent_phone}</span>
-              </a>
-
-              <div className="flex items-center gap-1">
-                <button
-                  onClick={() => {
-                    setSelectedStudentForMove(st)
-                    setTargetGroupId(groups.find((g) => g.id !== st.group_id)?.id || '')
-                    setMoveModalOpen(true)
-                  }}
-                  disabled={!teacherStatus.isActive}
-                  className="rounded-lg p-1.5 text-slate-500 hover:bg-blue-50 hover:text-[#1d5ca8] disabled:opacity-30"
-                  aria-label="نقل"
+              <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-2.5">
+                <a
+                  href={`tel:${st.parent_phone}`}
+                  className="inline-flex items-center gap-1 text-xs font-bold text-slate-700 hover:text-[#1d5ca8]"
+                  dir="ltr"
                 >
-                  <MoveRight className="size-4" />
-                </button>
+                  <Phone className="size-3 text-emerald-600" />
+                  <span>{st.parent_phone}</span>
+                </a>
+
+                <div className="flex items-center gap-1">
+                  {!st.group_id && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedStudentForMove(st)
+                        setTargetGroupId(groups[0]?.id || '')
+                        setMoveModalOpen(true)
+                      }}
+                      disabled={!teacherStatus.isActive || groups.length === 0}
+                      className="rounded-lg bg-blue-50 border border-blue-200 px-2.5 py-1 text-xs font-bold text-[#1d5ca8] hover:bg-blue-100 disabled:opacity-30"
+                    >
+                      تسكين
+                    </button>
+                  )}
+                  <button
+                    onClick={() => {
+                      setSelectedStudentForMove(st)
+                      setTargetGroupId(groups.find((g) => g.id !== st.group_id)?.id || '')
+                      setMoveModalOpen(true)
+                    }}
+                    disabled={!teacherStatus.isActive}
+                    className="rounded-lg p-1.5 text-slate-500 hover:bg-blue-50 hover:text-[#1d5ca8] disabled:opacity-30"
+                    aria-label="نقل"
+                    title={st.group_id ? "نقل لمجموعة أخرى" : "تسكين في مجموعة"}
+                  >
+                    <MoveRight className="size-4" />
+                  </button>
                 <button
                   onClick={() => {
                     if (confirm(`هل أنت متأكد من حذف الطالب "${st.full_name}"؟`)) {
@@ -379,7 +481,23 @@ export function StudentsView({
                         {st.group_name}
                       </span>
                     ) : (
-                      <span className="text-slate-400">بدون مجموعة</span>
+                      <div className="flex items-center gap-2">
+                        <span className="rounded-md bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-800">
+                          بدون مجموعة
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedStudentForMove(st)
+                            setTargetGroupId(groups[0]?.id || '')
+                            setMoveModalOpen(true)
+                          }}
+                          disabled={!teacherStatus.isActive || groups.length === 0}
+                          className="rounded-lg border border-[#1d5ca8]/30 bg-blue-50 px-2 py-0.5 text-[11px] font-bold text-[#1d5ca8] hover:bg-[#1d5ca8] hover:text-white transition disabled:opacity-40"
+                        >
+                          تسكين الآن
+                        </button>
+                      </div>
                     )}
                   </td>
                   <td className="p-3.5 text-slate-600" dir="ltr">
@@ -528,7 +646,11 @@ export function StudentsView({
       <Modal
         isOpen={moveModalOpen}
         onClose={() => setMoveModalOpen(false)}
-        title={`نقل الطالب: ${selectedStudentForMove?.full_name || ''}`}
+        title={
+          selectedStudentForMove?.group_id
+            ? `نقل الطالب: ${selectedStudentForMove?.full_name || ''}`
+            : `تسكين الطالب: ${selectedStudentForMove?.full_name || ''} في مجموعة جديدة`
+        }
       >
         <form onSubmit={handleMoveSubmit} className="space-y-4">
           <div className="rounded-xl bg-slate-50 p-3 text-xs space-y-1">
@@ -536,7 +658,7 @@ export function StudentsView({
               المرحلة الحالية: <span className="font-bold">{selectedStudentForMove?.grade}</span>
             </p>
             <p className="text-slate-400">
-              * قاعدة النقل: يجب أن تكون المجموعة المستهدفة من نفس المرحلة وتتسع للطالب.
+              * سيتم تحديث مرحلة الطالب تلقائياً لتطابق المرحلة الدراسية للمجموعة المختارة.
             </p>
           </div>
 
@@ -579,7 +701,7 @@ export function StudentsView({
               className="inline-flex items-center gap-1.5 rounded-xl bg-[#1d5ca8] px-5 py-2 text-xs font-bold text-white shadow-xs hover:bg-[#164e93] disabled:opacity-50"
             >
               {loadingMove && <Loader2 className="size-3.5 animate-spin" />}
-              تأكيد نقل الطالب
+              {selectedStudentForMove?.group_id ? 'تأكيد نقل الطالب' : 'تسكين الطالب في المجموعة'}
             </button>
           </div>
         </form>
@@ -696,6 +818,66 @@ export function StudentsView({
               </div>
             </div>
           )}
+        </div>
+      </Modal>
+
+      {/* Finalize New Year & Purge Unassigned Students Modal */}
+      <Modal
+        isOpen={finalizeModalOpen}
+        onClose={() => setFinalizeModalOpen(false)}
+        title="تأكيد بدء العام الدراسي وحذف الطلاب غير المسجلين"
+        maxWidth="max-w-lg"
+      >
+        <div className="space-y-4">
+          <div className="rounded-2xl bg-amber-50 p-4 border border-amber-200 text-xs space-y-3">
+            <div className="flex items-center gap-2 font-bold text-amber-950 text-sm">
+              <CheckCircle2 className="size-5 text-emerald-600" />
+              <span>جاهز لبدء العام الدراسي الجديد؟</span>
+            </div>
+            <p className="text-slate-700 leading-relaxed">
+              سيقوم النظام الآن بتأكيد العام الدراسي رسمياً، وتنظيف قاعدة البيانات:
+            </p>
+            <div className="grid grid-cols-2 gap-2 text-center">
+              <div className="rounded-xl bg-white p-3 border border-emerald-200">
+                <span className="block text-lg font-black text-emerald-700">
+                  {students.length - unassignedCount}
+                </span>
+                <span className="text-[11px] font-bold text-slate-600">طالب مسكن بمجموعات (سيتم الاحتفاظ بهم)</span>
+              </div>
+              <div className="rounded-xl bg-white p-3 border border-rose-200">
+                <span className="block text-lg font-black text-rose-600">
+                  {unassignedCount}
+                </span>
+                <span className="text-[11px] font-bold text-slate-600">طالب بدون مجموعة (سيتم حذفهم نهائياً)</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-xl bg-rose-50 p-3 border border-rose-200 text-xs text-rose-800 flex items-start gap-2">
+            <AlertTriangle className="size-4 shrink-0 text-rose-600 mt-0.5" />
+            <span>
+              تحذير: سيتم حذف جميع الطلاب غير المسجلين في أي مجموعة بشكل نهائي لتفريغ المساحة. هذا الإجراء لا يمكن التراجع عنه.
+            </span>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+            <button
+              type="button"
+              onClick={() => setFinalizeModalOpen(false)}
+              className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50"
+            >
+              مراجعة وتسكين أولاً
+            </button>
+            <button
+              type="button"
+              onClick={handleConfirmFinalize}
+              disabled={loadingFinalize}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-rose-600 px-5 py-2 text-xs font-bold text-white shadow-xs hover:bg-rose-700 disabled:opacity-50"
+            >
+              {loadingFinalize && <Loader2 className="size-3.5 animate-spin" />}
+              تأكيد بدء العام وحذف غير المسجلين
+            </button>
+          </div>
         </div>
       </Modal>
     </div>

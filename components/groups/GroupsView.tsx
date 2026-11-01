@@ -1,7 +1,20 @@
 'use client'
 
 import React, { useState } from 'react'
-import { Plus, Users, Calendar, Clock, Trash2, Edit2, AlertCircle, Loader2 } from 'lucide-react'
+import {
+  Plus,
+  Users,
+  Calendar,
+  Clock,
+  Trash2,
+  Edit2,
+  AlertCircle,
+  Loader2,
+  Sparkles,
+  GraduationCap,
+  AlertTriangle,
+  CheckCircle2,
+} from 'lucide-react'
 import { Modal } from '@/components/ui/modal'
 import { TimePicker } from '@/components/ui/time-picker'
 import { ARABIC_WEEKDAYS } from '@/lib/occurrences'
@@ -35,6 +48,12 @@ interface Props {
   ) => Promise<void>
   onDeleteGroup: (groupId: string) => Promise<void>
   teacherStatus: TeacherStatus
+  onPrepareNewYear?: () => Promise<void>
+  onFinalizeNewYear?: () => Promise<void>
+  unassignedStudentsCount?: number
+  totalStudentsCount?: number
+  isNewYearPrep?: boolean
+  onNavigateToStudents?: (filter?: string) => void
 }
 
 export function GroupsView({
@@ -43,9 +62,21 @@ export function GroupsView({
   onUpdateGroup,
   onDeleteGroup,
   teacherStatus,
+  onPrepareNewYear,
+  onFinalizeNewYear,
+  unassignedStudentsCount = 0,
+  totalStudentsCount = 0,
+  isNewYearPrep = false,
+  onNavigateToStudents,
 }: Props) {
   const [modalOpen, setModalOpen] = useState(false)
   const [loading, setLoading] = useState(false)
+
+  // New Academic Year modals & state
+  const [prepareModalOpen, setPrepareModalOpen] = useState(false)
+  const [loadingPrepare, setLoadingPrepare] = useState(false)
+  const [finalizeModalOpen, setFinalizeModalOpen] = useState(false)
+  const [loadingFinalize, setLoadingFinalize] = useState(false)
 
   // Edit Group states
   const [editModalOpen, setEditModalOpen] = useState(false)
@@ -143,8 +174,87 @@ export function GroupsView({
     }
   }
 
+  const handleConfirmPrepare = async () => {
+    if (!onPrepareNewYear) return
+    setLoadingPrepare(true)
+    try {
+      await onPrepareNewYear()
+      setPrepareModalOpen(false)
+    } catch (err: any) {
+      console.error(err)
+      alert(err?.message || 'فشل بدء التحضير للعام الجديد')
+    } finally {
+      setLoadingPrepare(false)
+    }
+  }
+
+  const handleConfirmFinalize = async () => {
+    if (!onFinalizeNewYear) return
+    setLoadingFinalize(true)
+    try {
+      await onFinalizeNewYear()
+      setFinalizeModalOpen(false)
+    } catch (err: any) {
+      console.error(err)
+      alert(err?.message || 'فشل بدء العام الجديد وحذف الطلاب')
+    } finally {
+      setLoadingFinalize(false)
+    }
+  }
+
   return (
     <div className="space-y-6">
+      {/* New Year Preparation Banner */}
+      {(isNewYearPrep || unassignedStudentsCount > 0) && (
+        <div className="rounded-2xl border-2 border-amber-300 bg-linear-to-r from-amber-50 to-orange-50 p-4 sm:p-5 shadow-xs">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className="rounded-xl bg-amber-500/15 p-2.5 text-amber-700 shrink-0">
+                <GraduationCap className="size-6" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm sm:text-base font-black text-amber-950">
+                    مرحلة إعداد العام الدراسي الجديد
+                  </h3>
+                  <span className="rounded-full bg-amber-200 px-2.5 py-0.5 text-xs font-black text-amber-800">
+                    {unassignedStudentsCount} طالب بانتظار التسكين
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-amber-900/80 leading-relaxed">
+                  تم مسح المجموعات القديمة. قم بإنشاء مجموعات العام الجديد، ثم وزّع الطلاب المستمرين معك عليها من شاشة قائمة الطلاب.
+                  عند الانتهاء والجاهزية، اضغط على زر <strong>بدء العام وحذف غير المسجلين</strong>.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 self-end sm:self-center shrink-0">
+              {onNavigateToStudents && (
+                <button
+                  type="button"
+                  onClick={() => onNavigateToStudents('unassigned')}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-amber-300 bg-white px-3.5 py-2 text-xs font-bold text-amber-900 shadow-2xs hover:bg-amber-100 transition"
+                >
+                  <Users className="size-3.5 text-amber-700" />
+                  <span>تسكين الطلاب الآن</span>
+                </button>
+              )}
+              {onFinalizeNewYear && (
+                <button
+                  type="button"
+                  onClick={() => setFinalizeModalOpen(true)}
+                  disabled={!teacherStatus.isActive}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-amber-600 px-4 py-2 text-xs font-black text-white shadow-sm hover:bg-amber-700 transition disabled:opacity-50"
+                >
+                  <CheckCircle2 className="size-3.5" />
+                  <span>بدء العام وحذف غير المسجلين ({unassignedStudentsCount})</span>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header Bar */}
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
         <div>
@@ -154,14 +264,28 @@ export function GroupsView({
           </p>
         </div>
 
-        <button
-          onClick={() => setModalOpen(true)}
-          disabled={!teacherStatus.isActive}
-          className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#1d5ca8] px-4 py-2.5 text-sm font-bold text-white shadow-md transition hover:bg-[#164e93] disabled:opacity-50"
-        >
-          <Plus className="size-4" />
-          <span>إضافة مجموعة جديدة</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {onPrepareNewYear && (
+            <button
+              type="button"
+              onClick={() => setPrepareModalOpen(true)}
+              disabled={!teacherStatus.isActive}
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-xs font-bold text-slate-700 shadow-xs transition hover:bg-slate-50 hover:text-[#1d5ca8] disabled:opacity-50"
+            >
+              <Sparkles className="size-4 text-amber-500" />
+              <span>بدء عام دراسي جديد</span>
+            </button>
+          )}
+
+          <button
+            onClick={() => setModalOpen(true)}
+            disabled={!teacherStatus.isActive}
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#1d5ca8] px-4 py-2.5 text-xs sm:text-sm font-bold text-white shadow-md transition hover:bg-[#164e93] disabled:opacity-50"
+          >
+            <Plus className="size-4" />
+            <span>إضافة مجموعة جديدة</span>
+          </button>
+        </div>
       </div>
 
       {/* Groups Grid */}
@@ -531,6 +655,132 @@ export function GroupsView({
             </button>
           </div>
         </form>
+      </Modal>
+
+      {/* Prepare New Year Modal */}
+      <Modal
+        isOpen={prepareModalOpen}
+        onClose={() => setPrepareModalOpen(false)}
+        title="بدء عام دراسي جديد (إعادة تهيئة المجموعات)"
+        maxWidth="max-w-lg"
+      >
+        <div className="space-y-4">
+          <div className="flex items-center gap-3 rounded-2xl bg-amber-50 p-4 border border-amber-200">
+            <div className="rounded-xl bg-amber-500/20 p-2.5 text-amber-800 shrink-0">
+              <Sparkles className="size-6 text-amber-600" />
+            </div>
+            <div>
+              <h4 className="text-sm font-bold text-amber-950">
+                تهيئة النظام لاستقبال العام الدراسي الجديد
+              </h4>
+              <p className="mt-0.5 text-xs text-amber-800/80">
+                إجراء مصمم لتنظيم المجموعات وتصفية الطلاب المستمرين بسهولة
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-2.5 text-xs text-slate-700">
+            <p className="font-bold text-slate-900">عند تأكيد هذا الإجراء، سيحدث الآتي:</p>
+            <ul className="space-y-2 list-disc list-inside pr-1 text-slate-600">
+              <li>
+                <strong>حذف كافة المجموعات الحالية</strong> وجداول المواعيد الأسبوعية التابعة لها.
+              </li>
+              <li>
+                <strong>الاحتفاظ بجميع بيانات الطلاب الحاليين</strong> في النظام كـ (طلاب بدون مجموعة) مؤقتاً.
+              </li>
+              <li>
+                يمكنك بعد ذلك إنشاء مجموعات العام الجديد وتسكين الطلاب المستمرين معك عليها.
+              </li>
+              <li>
+                بمجرد أن تصبح جاهزاً، ستضغط على زر <strong>"بدء العام وحذف غير المسجلين"</strong> لحذف أي طالب قديم لم يستمر معك نهائياً وتفريغ المساحة.
+              </li>
+            </ul>
+          </div>
+
+          <div className="rounded-xl bg-rose-50 p-3 border border-rose-200 text-xs text-rose-800 flex items-start gap-2">
+            <AlertTriangle className="size-4 shrink-0 text-rose-600 mt-0.5" />
+            <span>تنبيه: سيتم مسح سجلات الحصص السابقة للمجموعات الحالية. تأكد من أنك أنهيت العام الحالي بالكامل.</span>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+            <button
+              type="button"
+              onClick={() => setPrepareModalOpen(false)}
+              className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50"
+            >
+              إلغاء
+            </button>
+            <button
+              type="button"
+              onClick={handleConfirmPrepare}
+              disabled={loadingPrepare}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-amber-600 px-5 py-2 text-xs font-bold text-white shadow-xs hover:bg-amber-700 disabled:opacity-50"
+            >
+              {loadingPrepare && <Loader2 className="size-3.5 animate-spin" />}
+              تأكيد مسح المجموعات وبدء التحضير
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Finalize New Year & Purge Unassigned Students Modal */}
+      <Modal
+        isOpen={finalizeModalOpen}
+        onClose={() => setFinalizeModalOpen(false)}
+        title="تأكيد بدء العام وحذف الطلاب غير المسجلين"
+        maxWidth="max-w-lg"
+      >
+        <div className="space-y-4">
+          <div className="rounded-2xl bg-amber-50 p-4 border border-amber-200 text-xs space-y-3">
+            <div className="flex items-center gap-2 font-bold text-amber-950 text-sm">
+              <CheckCircle2 className="size-5 text-emerald-600" />
+              <span>جاهز لبدء العام الدراسي الجديد؟</span>
+            </div>
+            <p className="text-slate-700 leading-relaxed">
+              سيقوم النظام الآن بتأكيد العام الدراسي رسمياً، وتنظيف قاعدة البيانات:
+            </p>
+            <div className="grid grid-cols-2 gap-2 text-center">
+              <div className="rounded-xl bg-white p-3 border border-emerald-200">
+                <span className="block text-lg font-black text-emerald-700">
+                  {Math.max(0, totalStudentsCount - unassignedStudentsCount)}
+                </span>
+                <span className="text-[11px] font-bold text-slate-600">طالب مسكن بمجموعات (سيتم الاحتفاظ بهم)</span>
+              </div>
+              <div className="rounded-xl bg-white p-3 border border-rose-200">
+                <span className="block text-lg font-black text-rose-600">
+                  {unassignedStudentsCount}
+                </span>
+                <span className="text-[11px] font-bold text-slate-600">طالب بدون مجموعة (سيتم حذفهم نهائياً)</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-xl bg-rose-50 p-3 border border-rose-200 text-xs text-rose-800 flex items-start gap-2">
+            <AlertTriangle className="size-4 shrink-0 text-rose-600 mt-0.5" />
+            <span>
+              تحذير: سيتم حذف جميع الطلاب غير المسجلين في أي مجموعة بشكل نهائي لتفريغ المساحة. هذا الإجراء لا يمكن التراجع عنه.
+            </span>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+            <button
+              type="button"
+              onClick={() => setFinalizeModalOpen(false)}
+              className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50"
+            >
+              مراجعة وتسكين أولاً
+            </button>
+            <button
+              type="button"
+              onClick={handleConfirmFinalize}
+              disabled={loadingFinalize}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-rose-600 px-5 py-2 text-xs font-bold text-white shadow-xs hover:bg-rose-700 disabled:opacity-50"
+            >
+              {loadingFinalize && <Loader2 className="size-3.5 animate-spin" />}
+              تأكيد بدء العام وحذف غير المسجلين
+            </button>
+          </div>
+        </div>
       </Modal>
     </div>
   )
