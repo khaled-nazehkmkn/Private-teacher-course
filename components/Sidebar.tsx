@@ -16,6 +16,7 @@ import {
   LogOut,
   X,
   KeyRound,
+  Bell,
 } from 'lucide-react'
 import { ChangePasswordModal } from '@/components/profile/ChangePasswordModal'
 
