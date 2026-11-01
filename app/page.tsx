@@ -1283,6 +1283,7 @@ export default function TeacherAppPage() {
           {activeTab === 'بنك الأسئلة' && (
             <QuestionsView
               questions={questions}
+              groups={groups}
               onAddQuestion={handleAddQuestion}
               onBatchAddQuestions={handleBatchAddQuestions}
               onDeleteQuestion={handleDeleteQuestion}

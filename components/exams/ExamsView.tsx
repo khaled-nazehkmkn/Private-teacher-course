@@ -228,17 +228,25 @@ export function ExamsView({
 
     if (selectionMode === 'random') {
       const targetGroup = groups.find((g) => g.id === targetGroupId)
-      const matchingQuestions = questions.filter(
-        (q) => !targetGroup || q.grade === targetGroup.grade
-      )
+      const matchingQuestions = questions.filter((q) => {
+        if (!targetGroup) return true
+        const matchesGroup = q.topic && q.topic.includes(targetGroup.name)
+        const matchesGrade =
+          q.grade === targetGroup.grade ||
+          q.grade === targetGroup.name ||
+          (q.grade && targetGroup.grade && q.grade.trim() === targetGroup.grade.trim())
+        return matchesGroup || matchesGrade
+      })
 
-      if (matchingQuestions.length === 0) {
-        alert('لا توجد أسئلة كافية في بنك الأسئلة لهذه المرحلة الدراسية')
+      const pool = matchingQuestions.length > 0 ? matchingQuestions : questions
+
+      if (pool.length === 0) {
+        alert('لا توجد أسئلة في بنك الأسئلة كافية لإنشاء هذا الاختبار')
         return
       }
 
       // Pick random
-      const shuffledPool = [...matchingQuestions].sort(() => Math.random() - 0.5)
+      const shuffledPool = [...pool].sort(() => Math.random() - 0.5)
       finalQuestionIds = shuffledPool.slice(0, randomCount).map((q) => q.id)
     }
 
@@ -552,34 +560,51 @@ export function ExamsView({
               </div>
             ) : (
               <div className="max-h-48 overflow-y-auto rounded-xl border border-slate-200 p-2 text-xs space-y-1.5">
-                {questions.map((q) => {
-                  const isChecked = selectedQuestionIds.includes(q.id)
-                  return (
-                    <label
-                      key={q.id}
-                      className="flex items-start gap-2 rounded-lg p-1.5 hover:bg-slate-50 cursor-pointer"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={isChecked}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setSelectedQuestionIds((prev) => [...prev, q.id])
-                          } else {
-                            setSelectedQuestionIds((prev) => prev.filter((id) => id !== q.id))
-                          }
-                        }}
-                        className="mt-0.5"
-                      />
-                      <div className="min-w-0 flex-1">
-                        <p className="font-semibold text-slate-800">{q.body}</p>
-                        <p className="text-[11px] text-slate-400">
-                          {q.grade} · {q.marks} درجة
-                        </p>
-                      </div>
-                    </label>
-                  )
-                })}
+                {(() => {
+                  const targetGroup = groups.find((g) => g.id === targetGroupId)
+                  const matching = targetGroup
+                    ? questions.filter((q) => {
+                        const matchesGroup = q.topic && q.topic.includes(targetGroup.name)
+                        const matchesGrade =
+                          q.grade === targetGroup.grade ||
+                          q.grade === targetGroup.name ||
+                          (q.grade && targetGroup.grade && q.grade.trim() === targetGroup.grade.trim())
+                        return matchesGroup || matchesGrade
+                      })
+                    : questions
+                  const listToRender = matching.length > 0 ? matching : questions
+
+                  return listToRender.map((q) => {
+                    const isChecked = selectedQuestionIds.includes(q.id)
+                    return (
+                      <label
+                        key={q.id}
+                        className="flex items-start gap-2 rounded-lg p-1.5 hover:bg-slate-50 cursor-pointer"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedQuestionIds((prev) => [...prev, q.id])
+                            } else {
+                              setSelectedQuestionIds((prev) => prev.filter((id) => id !== q.id))
+                            }
+                          }}
+                          className="mt-0.5"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="font-semibold text-slate-800">{q.body}</p>
+                          <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
+                            <span>{q.grade}</span>
+                            {q.topic && <span>· {q.topic}</span>}
+                            <span>· {q.marks} درجة</span>
+                          </div>
+                        </div>
+                      </label>
+                    )
+                  })
+                })()}
               </div>
             )}
           </div>

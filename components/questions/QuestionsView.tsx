@@ -18,12 +18,14 @@ import {
   ZoomIn,
   X,
   Sparkles,
+  Users,
 } from 'lucide-react'
 import { Modal } from '@/components/ui/modal'
 import { compressImage } from '@/lib/image-compress'
 import { parseJsonQuestions, parseExcelQuestions, type ParsedQuestion } from '@/lib/question-parser'
 import { downloadSampleQuestionExcel } from '@/lib/sample-excel'
 import type { TeacherStatus } from '@/lib/teacher-status'
+import type { GroupItem } from '../groups/GroupsView'
 
 export const AI_PROMPT_TEMPLATE = `أنت معلم خبير ومصمم اختبارات محترف.
 يرجى قراءة الدرس/المستند المرفق وتوليد مجموعة من أسئلة الاختيار من متعدد (MCQ) باللغة العربية بصيغة JSON حصراً، وفق الهيكل البرمجي التالي بدقة تامة ودون كتابة أي نصوص تمهيدية أو شروحات:
@@ -51,7 +53,8 @@ export const AI_PROMPT_TEMPLATE = `أنت معلم خبير ومصمم اختب�
 1. "options": مصفوفة تحتوي على 4 خيارات منطقية ومتنوعة.
 2. "correct": مصفوفة برقم مؤشر الإجابة الصحيحة (0 للخيار الأول، 1 للثاني، 2 للثالث، 3 للرابع).
 3. "marks": درجة السؤال (رقم صحيح مثلاً 1 أو 2).
-4. "difficulty": مستوى الصعوبة ("easy" أو "medium" أو "hard").`
+4. "difficulty": مستوى الصعوبة ("easy" أو "medium" أو "hard").
+5. لا داعي لكتابة اسم المجموعة في الـ JSON، حيث يقوم التطبيق بتعيين المجموعة المحددة تلقائياً لكافة الأسئلة المستوردة.`
 
 export interface QuestionBankItem {
   id: string
@@ -69,6 +72,7 @@ export interface QuestionBankItem {
 
 interface Props {
   questions: QuestionBankItem[]
+  groups?: GroupItem[]
   onAddQuestion: (q: Omit<QuestionBankItem, 'id'>) => Promise<void>
   onBatchAddQuestions: (qList: Omit<QuestionBankItem, 'id'>[]) => Promise<void>
   onDeleteQuestion: (id: string) => Promise<void>
@@ -78,6 +82,7 @@ interface Props {
 
 export function QuestionsView({
   questions,
+  groups = [],
   onAddQuestion,
   onBatchAddQuestions,
   onDeleteQuestion,
@@ -86,6 +91,11 @@ export function QuestionsView({
 }: Props) {
   const [searchTerm, setSearchTerm] = useState('')
   const [gradeFilter, setGradeFilter] = useState('all')
+  const [groupFilter, setGroupFilter] = useState('all')
+
+  // Group selection states
+  const [importTargetGroup, setImportTargetGroup] = useState<string>(groups[0]?.id || '')
+  const [manualTargetGroup, setManualTargetGroup] = useState<string>(groups[0]?.id || '')
 
   // Manual Question Modal
   const [manualModalOpen, setManualModalOpen] = useState(false)
@@ -119,7 +129,11 @@ export function QuestionsView({
       q.body.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (q.topic && q.topic.toLowerCase().includes(searchTerm.toLowerCase()))
     const matchesGrade = gradeFilter === 'all' || q.grade === gradeFilter
-    return matchesSearch && matchesGrade
+    const matchesGroup =
+      groupFilter === 'all' ||
+      (q.topic && q.topic.includes(groupFilter)) ||
+      q.grade === groupFilter
+    return matchesSearch && matchesGrade && matchesGroup
   })
 
   // Submit Single Question
@@ -155,14 +169,26 @@ export function QuestionsView({
         }
       }
 
+      const selectedGrp = groups.find((g) => g.id === manualTargetGroup)
+      const finalGrade = selectedGrp
+        ? selectedGrp.grade
+        : manualTargetGroup.startsWith('grade:')
+        ? manualTargetGroup.replace('grade:', '')
+        : grade
+      const groupPrefix = selectedGrp ? `${selectedGrp.name}` : ''
+      let finalTopic = topic.trim()
+      if (groupPrefix && !finalTopic.includes(groupPrefix)) {
+        finalTopic = finalTopic ? `${groupPrefix} | ${finalTopic}` : groupPrefix
+      }
+
       await onAddQuestion({
         body: body.trim(),
         type: questionType,
         options: questionType === 'mcq' ? validOptions : [],
         correct: questionType === 'mcq' ? [correctIdx >= validOptions.length ? 0 : correctIdx] : [],
         marks,
-        grade,
-        topic: topic.trim() || undefined,
+        grade: finalGrade,
+        topic: finalTopic || undefined,
         difficulty,
         image_path: uploadedImagePath,
         model_answer: questionType === 'essay' && modelAnswer.trim() ? modelAnswer.trim() : undefined,
@@ -254,24 +280,39 @@ export function QuestionsView({
   const handleConfirmBatch = async () => {
     if (!parsedPreview.length) return
 
+    const selectedGrp = groups.find((g) => g.id === importTargetGroup)
+    const finalGrade = selectedGrp
+      ? selectedGrp.grade
+      : importTargetGroup.startsWith('grade:')
+      ? importTargetGroup.replace('grade:', '')
+      : (groups[0]?.grade || grade)
+    const groupPrefix = selectedGrp ? `${selectedGrp.name}` : ''
+
     setImporting(true)
     try {
       await onBatchAddQuestions(
-        parsedPreview.map((p) => ({
-          body: p.body,
-          options: p.options,
-          correct: p.correct,
-          marks: p.marks,
-          grade: p.grade || grade,
-          topic: p.topic,
-          difficulty: p.difficulty,
-          image_path: p.image_path,
-        }))
+        parsedPreview.map((p) => {
+          let questionTopic = p.topic || ''
+          if (groupPrefix && !questionTopic.includes(groupPrefix)) {
+            questionTopic = questionTopic ? `${groupPrefix} | ${questionTopic}` : groupPrefix
+          }
+          return {
+            body: p.body,
+            type: 'mcq' as const,
+            options: p.options,
+            correct: p.correct,
+            marks: p.marks,
+            grade: finalGrade || p.grade || 'الصف الأول الثانوي',
+            topic: questionTopic || undefined,
+            difficulty: p.difficulty,
+            image_path: p.image_path,
+          }
+        })
       )
       setImportModalOpen(false)
       setParsedPreview([])
       setJsonText('')
-      alert(`تم استيراد ${parsedPreview.length} سؤال إلى بنك الأسئلة!`)
+      alert(`تم استيراد ${parsedPreview.length} سؤال بنجاح وتعيينها لـ "${selectedGrp?.name || finalGrade}"!`)
     } catch (err) {
       console.error(err)
       alert('فشل استيراد الأسئلة')
@@ -325,21 +366,41 @@ export function QuestionsView({
           />
         </div>
 
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-bold text-slate-400">المرحلة:</span>
-          <select
-            value={gradeFilter}
-            onChange={(e) => setGradeFilter(e.target.value)}
-            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 outline-hidden"
-          >
-            <option value="all">كل المراحل</option>
-            <option value="الصف الأول الإعدادي">الصف الأول الإعدادي</option>
-            <option value="الصف الثاني الإعدادي">الصف الثاني الإعدادي</option>
-            <option value="الصف الثالث الإعدادي">الصف الثالث الإعدادي</option>
-            <option value="الصف الأول الثانوي">الصف الأول الثانوي</option>
-            <option value="الصف الثاني الثانوي">الصف الثاني الثانوي</option>
-            <option value="الصف الثالث الثانوي">الصف الثالث الثانوي</option>
-          </select>
+        <div className="flex flex-wrap items-center gap-2">
+          {groups.length > 0 && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-bold text-slate-400">المجموعة:</span>
+              <select
+                value={groupFilter}
+                onChange={(e) => setGroupFilter(e.target.value)}
+                className="rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 outline-hidden"
+              >
+                <option value="all">كل المجموعات</option>
+                {groups.map((g) => (
+                  <option key={g.id} value={g.name}>
+                    {g.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs font-bold text-slate-400">المرحلة:</span>
+            <select
+              value={gradeFilter}
+              onChange={(e) => setGradeFilter(e.target.value)}
+              className="rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 outline-hidden"
+            >
+              <option value="all">كل المراحل</option>
+              <option value="الصف الأول الإعدادي">الصف الأول الإعدادي</option>
+              <option value="الصف الثاني الإعدادي">الصف الثاني الإعدادي</option>
+              <option value="الصف الثالث الإعدادي">الصف الثالث الإعدادي</option>
+              <option value="الصف الأول الثانوي">الصف الأول الثانوي</option>
+              <option value="الصف الثاني الثانوي">الصف الثاني الثانوي</option>
+              <option value="الصف الثالث الثانوي">الصف الثالث الثانوي</option>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -361,11 +422,22 @@ export function QuestionsView({
                   <span className="rounded-md bg-blue-50 px-2 py-0.5 text-xs font-bold text-[#1d5ca8]">
                     {q.grade || 'عام'}
                   </span>
-                  {q.topic && (
+                  {q.topic && q.topic.includes('|') ? (
+                    <>
+                      <span className="rounded-md bg-purple-50 px-2 py-0.5 text-xs font-bold text-purple-700">
+                        👥 {q.topic.split('|')[0].trim()}
+                      </span>
+                      {q.topic.split('|')[1]?.trim() && (
+                        <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-600">
+                          {q.topic.split('|')[1].trim()}
+                        </span>
+                      )}
+                    </>
+                  ) : q.topic ? (
                     <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-600">
                       {q.topic}
                     </span>
-                  )}
+                  ) : null}
                 </div>
 
                 <div className="flex items-center gap-1.5">
@@ -559,18 +631,34 @@ export function QuestionsView({
 
           <div className="grid grid-cols-3 gap-3">
             <div>
-              <label className="mb-1 block text-xs font-bold text-slate-700">المرحلة</label>
+              <label className="mb-1 block text-xs font-bold text-slate-700">المجموعة المستهدفة / المرحلة</label>
               <select
-                value={grade}
-                onChange={(e) => setGrade(e.target.value)}
-                className="w-full rounded-xl border border-slate-200 p-2 text-xs outline-hidden"
+                value={manualTargetGroup}
+                onChange={(e) => {
+                  const val = e.target.value
+                  setManualTargetGroup(val)
+                  const grp = groups.find((g) => g.id === val)
+                  if (grp) {
+                    setGrade(grp.grade)
+                  } else if (val.startsWith('grade:')) {
+                    setGrade(val.replace('grade:', ''))
+                  }
+                }}
+                className="w-full rounded-xl border border-slate-200 p-2 text-xs font-semibold outline-hidden focus:border-[#1d5ca8]"
               >
-                <option value="الصف الأول الإعدادي">الصف الأول الإعدادي</option>
-                <option value="الصف الثاني الإعدادي">الصف الثاني الإعدادي</option>
-                <option value="الصف الثالث الإعدادي">الصف الثالث الإعدادي</option>
-                <option value="الصف الأول الثانوي">الصف الأول الثانوي</option>
-                <option value="الصف الثاني الثانوي">الصف الثاني الثانوي</option>
-                <option value="الصف الثالث الثانوي">الصف الثالث الثانوي</option>
+                {groups.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    مجموعة: {g.name} ({g.grade})
+                  </option>
+                ))}
+                <optgroup label="المراحل العامة">
+                  <option value="grade:الصف الأول الإعدادي">الصف الأول الإعدادي</option>
+                  <option value="grade:الصف الثاني الإعدادي">الصف الثاني الإعدادي</option>
+                  <option value="grade:الصف الثالث الإعدادي">الصف الثالث الإعدادي</option>
+                  <option value="grade:الصف الأول الثانوي">الصف الأول الثانوي</option>
+                  <option value="grade:الصف الثاني الثانوي">الصف الثاني الثانوي</option>
+                  <option value="grade:الصف الثالث الثانوي">الصف الثالث الثانوي</option>
+                </optgroup>
               </select>
             </div>
 
@@ -664,6 +752,36 @@ export function QuestionsView({
         maxWidth="max-w-2xl"
       >
         <div className="space-y-4">
+          {/* Target Group Selector (Ensures questions go to the exact group without name discrepancies) */}
+          <div className="rounded-2xl border border-blue-200 bg-blue-50/80 p-3.5 space-y-1.5">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-[#153b68]">
+              <Users className="size-4 text-[#1d5ca8]" />
+              <span>المجموعة المستهدفة لهذه الأسئلة (سيتم تعيينها لجميع الأسئلة المستوردة):</span>
+            </div>
+            <select
+              value={importTargetGroup}
+              onChange={(e) => setImportTargetGroup(e.target.value)}
+              className="w-full rounded-xl border border-blue-300 bg-white p-2.5 text-xs font-bold text-slate-800 outline-hidden focus:border-[#1d5ca8]"
+            >
+              {groups.map((g) => (
+                <option key={g.id} value={g.id}>
+                  مجموعة: {g.name} ({g.grade})
+                </option>
+              ))}
+              <optgroup label="أو تحديد مرحلة دراسية عامة (لكل المجموعات)">
+                <option value="grade:الصف الأول الإعدادي">عام - الصف الأول الإعدادي</option>
+                <option value="grade:الصف الثاني الإعدادي">عام - الصف الثاني الإعدادي</option>
+                <option value="grade:الصف الثالث الإعدادي">عام - الصف الثالث الإعدادي</option>
+                <option value="grade:الصف الأول الثانوي">عام - الصف الأول الثانوي</option>
+                <option value="grade:الصف الثاني الثانوي">عام - الصف الثاني الثانوي</option>
+                <option value="grade:الصف الثالث الثانوي">عام - الصف الثالث الثانوي</option>
+              </optgroup>
+            </select>
+            <p className="text-[11px] text-blue-700">
+              💡 لا داعي لكتابة اسم المجموعة في ملف الـ JSON أو الـ Excel؛ سيتولى النظام توجيه وتعيين الأسئلة المستوردة للمجموعة المحددة هنا مباشرة لتفادي أي أخطاء في الأسماء.
+            </p>
+          </div>
+
           <div className="flex gap-2 border-b border-slate-200 pb-2">
             <button
               type="button"
@@ -815,9 +933,16 @@ export function QuestionsView({
 
           {parsedPreview.length > 0 && (
             <div className="space-y-2 border-t border-slate-100 pt-3">
-              <p className="text-xs font-bold text-emerald-700">
-                تم التحقق من صحة {parsedPreview.length} سؤال بنجاح!
-              </p>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs font-bold text-emerald-700">
+                  تم التحقق من صحة {parsedPreview.length} سؤال بنجاح!
+                </p>
+                {importTargetGroup && (
+                  <span className="rounded-lg bg-blue-50 px-2.5 py-1 text-[11px] font-bold text-[#1d5ca8]">
+                    المجموعة المستهدفة: {groups.find(g => g.id === importTargetGroup)?.name || importTargetGroup.replace('grade:', '')}
+                  </span>
+                )}
+              </div>
               <div className="max-h-40 overflow-y-auto rounded-xl border border-slate-200 p-2 text-xs space-y-2">
                 {parsedPreview.map((p, i) => (
                   <div key={i} className="border-b pb-1 last:border-0">
