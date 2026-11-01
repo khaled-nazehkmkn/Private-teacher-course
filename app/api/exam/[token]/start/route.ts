@@ -1,6 +1,11 @@
 import { NextResponse } from 'next/server'
 import { getAdminClient } from '@/lib/supabase/admin'
-import { checkRateLimit, recordFailedAttempt, resetAttempts } from '@/lib/rate-limit'
+import {
+  checkRateLimit,
+  recordFailedAttempt,
+  resetAttempts,
+  registerOrVerifyExamSession,
+} from '@/lib/rate-limit'
 import { normalizeArabicDigits } from '@/lib/access-code'
 
 export async function POST(
@@ -85,6 +90,18 @@ export async function POST(
       )
     }
 
+    // 4.1 Strict single-student active session enforcement
+    const deviceId = body.device_id ? String(body.device_id).trim() : `client_${clientIp}`
+    const sessionCheck = registerOrVerifyExamSession(
+      exam.id,
+      student.id,
+      deviceId,
+      exam.duration_min
+    )
+    if (!sessionCheck.allowed) {
+      return NextResponse.json({ error: sessionCheck.reason }, { status: 403 })
+    }
+
     // 5. Create or retrieve active submission
     let submissionId = existingSubmission?.id
     let startedAt = existingSubmission?.started_at
@@ -119,7 +136,8 @@ export async function POST(
           body,
           image_path,
           options,
-          marks
+          marks,
+          type
         )
       `)
       .eq('exam_id', exam.id)
@@ -128,6 +146,18 @@ export async function POST(
     if (eqError || !examQuestions) {
       console.error('[Exam Start] Error fetching exam questions:', eqError)
       return NextResponse.json({ error: 'تعذر جلب أسئلة الاختبار' }, { status: 500 })
+    }
+
+    // Check if previous session time ran out
+    if (existingSubmission?.started_at) {
+      const elapsedSeconds = Math.floor((Date.now() - new Date(existingSubmission.started_at).getTime()) / 1000)
+      const remainingSeconds = exam.duration_min * 60 - elapsedSeconds
+      if (remainingSeconds <= 0) {
+        return NextResponse.json(
+          { error: 'انتهت مدة الاختبار المحددة لك مسبقاً، ولا يمكن إعادة الدخول.' },
+          { status: 403 }
+        )
+      }
     }
 
     // Fetch any previously autosaved answers for this submission
@@ -153,6 +183,7 @@ export async function POST(
           id: q.id,
           body: q.body,
           image_path: q.image_path,
+          type: q.type || 'mcq',
           marks: eq.marks_override ?? q.marks,
           options: optionsList,
           saved_answer: savedAnswersMap.get(q.id) ?? null,

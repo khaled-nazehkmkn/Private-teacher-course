@@ -44,3 +44,50 @@ export function recordFailedAttempt(ip: string) {
 export function resetAttempts(ip: string) {
   attemptsMap.delete(ip)
 }
+
+// Single active device session tracking per (exam_id, student_id)
+interface ActiveExamSession {
+  deviceId: string
+  lastActive: number
+}
+
+const activeSessionsMap = new Map<string, ActiveExamSession>()
+
+export function registerOrVerifyExamSession(
+  examId: string,
+  studentId: string,
+  deviceId: string,
+  durationMinutes: number
+): { allowed: boolean; reason?: string } {
+  const sessionKey = `${examId}:${studentId}`
+  const now = Date.now()
+  const maxSessionDurationMs = Math.max(durationMinutes, 15) * 60 * 1000 + 5 * 60 * 1000 // duration + 5 min grace
+  const existing = activeSessionsMap.get(sessionKey)
+
+  if (existing) {
+    // If expired, clear it
+    if (now - existing.lastActive > maxSessionDurationMs) {
+      activeSessionsMap.delete(sessionKey)
+    } else if (existing.deviceId !== deviceId) {
+      // Different device trying to enter concurrently with the same student code
+      return {
+        allowed: false,
+        reason:
+          'هذا الكود قيد الاستخدام حالياً في جلسة اختبار نشطة على جهاز آخر. لا يُسمح بدخول أكثر من طالب أو جهاز في نفس الوقت بالكود نفسه.',
+      }
+    }
+  }
+
+  // Same device or new session: register / refresh
+  activeSessionsMap.set(sessionKey, {
+    deviceId,
+    lastActive: now,
+  })
+
+  return { allowed: true }
+}
+
+export function releaseExamSession(examId: string, studentId: string) {
+  const sessionKey = `${examId}:${studentId}`
+  activeSessionsMap.delete(sessionKey)
+}

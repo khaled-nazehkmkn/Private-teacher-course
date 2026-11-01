@@ -24,15 +24,41 @@ export interface GroupItem {
 interface Props {
   groups: GroupItem[]
   onAddGroup: (newGroup: Omit<GroupItem, 'id'>) => Promise<void>
+  onUpdateGroup?: (
+    groupId: string,
+    updatedData: {
+      name: string
+      grade: string
+      capacity: number
+      sessions: Array<{ weekday: number; start_time: string; end_time: string }>
+    }
+  ) => Promise<void>
   onDeleteGroup: (groupId: string) => Promise<void>
   teacherStatus: TeacherStatus
 }
 
-export function GroupsView({ groups, onAddGroup, onDeleteGroup, teacherStatus }: Props) {
+export function GroupsView({
+  groups,
+  onAddGroup,
+  onUpdateGroup,
+  onDeleteGroup,
+  teacherStatus,
+}: Props) {
   const [modalOpen, setModalOpen] = useState(false)
   const [loading, setLoading] = useState(false)
 
-  // Form states
+  // Edit Group states
+  const [editModalOpen, setEditModalOpen] = useState(false)
+  const [editingGroup, setEditingGroup] = useState<GroupItem | null>(null)
+  const [editName, setEditName] = useState('')
+  const [editGrade, setEditGrade] = useState('الصف الأول الثانوي')
+  const [editCapacity, setEditCapacity] = useState(20)
+  const [editSessions, setEditSessions] = useState<
+    Array<{ weekday: number; start_time: string; end_time: string }>
+  >([])
+  const [editLoading, setEditLoading] = useState(false)
+
+  // Form states (Add)
   const [name, setName] = useState('')
   const [grade, setGrade] = useState('الصف الأول الثانوي')
   const [capacity, setCapacity] = useState(20)
@@ -46,6 +72,53 @@ export function GroupsView({ groups, onAddGroup, onDeleteGroup, teacherStatus }:
 
   const removeSessionRow = (idx: number) => {
     setSessions((prev) => prev.filter((_, i) => i !== idx))
+  }
+
+  const addEditSessionRow = () => {
+    setEditSessions((prev) => [...prev, { weekday: 2, start_time: '17:00', end_time: '18:30' }])
+  }
+
+  const removeEditSessionRow = (idx: number) => {
+    setEditSessions((prev) => prev.filter((_, i) => i !== idx))
+  }
+
+  const handleOpenEdit = (grp: GroupItem) => {
+    setEditingGroup(grp)
+    setEditName(grp.name)
+    setEditGrade(grp.grade)
+    setEditCapacity(grp.capacity)
+    setEditSessions(
+      grp.sessions?.length > 0
+        ? grp.sessions.map((s) => ({
+            weekday: s.weekday,
+            start_time: s.start_time.slice(0, 5),
+            end_time: s.end_time.slice(0, 5),
+          }))
+        : [{ weekday: 0, start_time: '17:00', end_time: '18:30' }]
+    )
+    setEditModalOpen(true)
+  }
+
+  const handleSaveEdit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editingGroup || !editName.trim() || !onUpdateGroup) return
+
+    setEditLoading(true)
+    try {
+      await onUpdateGroup(editingGroup.id, {
+        name: editName.trim(),
+        grade: editGrade,
+        capacity: editCapacity,
+        sessions: editSessions,
+      })
+      setEditModalOpen(false)
+      setEditingGroup(null)
+    } catch (err) {
+      console.error('Error updating group:', err)
+      alert('فشل تحديث بيانات ومواعيد المجموعة')
+    } finally {
+      setEditLoading(false)
+    }
   }
 
   const handleCreateGroup = async (e: React.FormEvent) => {
@@ -142,7 +215,17 @@ export function GroupsView({ groups, onAddGroup, onDeleteGroup, teacherStatus }:
                 </div>
               </div>
 
-              <div className="mt-5 flex items-center justify-end gap-2 border-t border-slate-100 pt-3">
+              <div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-3">
+                <button
+                  type="button"
+                  onClick={() => handleOpenEdit(group)}
+                  disabled={!teacherStatus.isActive}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-bold text-slate-700 hover:bg-slate-100 hover:text-[#1d5ca8] transition disabled:opacity-40"
+                >
+                  <Edit2 className="size-3.5" />
+                  <span>تعديل المجموعة والمواعيد</span>
+                </button>
+
                 <button
                   onClick={() => {
                     if (confirm(`هل أنت متأكد من حذف مجموعة "${group.name}"؟`)) {
@@ -301,6 +384,150 @@ export function GroupsView({ groups, onAddGroup, onDeleteGroup, teacherStatus }:
             >
               {loading && <Loader2 className="size-3.5 animate-spin" />}
               حفظ المجموعة
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Edit Group Modal */}
+      <Modal
+        isOpen={editModalOpen}
+        onClose={() => {
+          setEditModalOpen(false)
+          setEditingGroup(null)
+        }}
+        title={`تعديل بيانات ومواعيد: ${editingGroup?.name || ''}`}
+      >
+        <form onSubmit={handleSaveEdit} className="space-y-4">
+          <div>
+            <label className="mb-1 block text-xs font-bold text-slate-700">اسم المجموعة</label>
+            <input
+              type="text"
+              required
+              value={editName}
+              onChange={(e) => setEditName(e.target.value)}
+              className="w-full rounded-xl border border-slate-200 p-2.5 text-sm outline-hidden focus:border-[#1d5ca8]"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-700">المرحلة الدراسية</label>
+              <select
+                value={editGrade}
+                onChange={(e) => setEditGrade(e.target.value)}
+                className="w-full rounded-xl border border-slate-200 p-2.5 text-sm outline-hidden focus:border-[#1d5ca8]"
+              >
+                <option value="الصف الأول الإعدادي">الصف الأول الإعدادي</option>
+                <option value="الصف الثاني الإعدادي">الصف الثاني الإعدادي</option>
+                <option value="الصف الثالث الإعدادي">الصف الثالث الإعدادي</option>
+                <option value="الصف الأول الثانوي">الصف الأول الثانوي</option>
+                <option value="الصف الثاني الثانوي">الصف الثاني الثانوي</option>
+                <option value="الصف الثالث الثانوي">الصف الثالث الثانوي</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-700">السعة (عدد الطلاب)</label>
+              <input
+                type="number"
+                min="1"
+                max="100"
+                value={editCapacity}
+                onChange={(e) => setEditCapacity(Number(e.target.value))}
+                className="w-full rounded-xl border border-slate-200 p-2.5 text-sm outline-hidden focus:border-[#1d5ca8]"
+              />
+            </div>
+          </div>
+
+          {/* Edit Weekly Sessions */}
+          <div className="space-y-3 rounded-2xl bg-slate-50 p-4 border border-slate-100">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-slate-800">
+                مواعيد الحصص الأسبوعية الثابتة:
+              </label>
+              <button
+                type="button"
+                onClick={addEditSessionRow}
+                className="inline-flex items-center gap-1 text-xs font-bold text-[#1d5ca8] hover:underline"
+              >
+                <Plus className="size-3.5" />
+                <span>إضافة موعد آخر</span>
+              </button>
+            </div>
+
+            {editSessions.map((sess, idx) => (
+              <div key={idx} className="flex flex-wrap items-center gap-2 rounded-xl bg-white p-3 border border-slate-200 shadow-2xs">
+                <div className="flex-1 min-w-[120px]">
+                  <select
+                    value={sess.weekday}
+                    onChange={(e) =>
+                      setEditSessions((prev) =>
+                        prev.map((s, i) => (i === idx ? { ...s, weekday: Number(e.target.value) } : s))
+                      )
+                    }
+                    className="w-full rounded-xl border border-slate-200 p-2 text-xs outline-hidden focus:border-[#1d5ca8]"
+                  >
+                    {ARABIC_WEEKDAYS.map((dayName, dIdx) => (
+                      <option key={dIdx} value={dIdx}>
+                        يوم {dayName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-slate-400">من:</span>
+                  <TimePicker
+                    value={sess.start_time}
+                    onChange={(val) =>
+                      setEditSessions((prev) =>
+                        prev.map((s, i) => (i === idx ? { ...s, start_time: val } : s))
+                      )
+                    }
+                  />
+                  <span className="text-[11px] text-slate-400">إلى:</span>
+                  <TimePicker
+                    value={sess.end_time}
+                    onChange={(val) =>
+                      setEditSessions((prev) =>
+                        prev.map((s, i) => (i === idx ? { ...s, end_time: val } : s))
+                      )
+                    }
+                  />
+                </div>
+
+                {editSessions.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => removeEditSessionRow(idx)}
+                    className="p-1 text-slate-400 hover:text-rose-600"
+                  >
+                    <Trash2 className="size-4" />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-5 flex justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={() => {
+                setEditModalOpen(false)
+                setEditingGroup(null)
+              }}
+              className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50"
+            >
+              إلغاء
+            </button>
+            <button
+              type="submit"
+              disabled={editLoading}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-[#1d5ca8] px-5 py-2 text-xs font-bold text-white shadow-xs hover:bg-[#164e93] disabled:opacity-50"
+            >
+              {editLoading && <Loader2 className="size-3.5 animate-spin" />}
+              حفظ التعديلات وتحديث الجدول
             </button>
           </div>
         </form>

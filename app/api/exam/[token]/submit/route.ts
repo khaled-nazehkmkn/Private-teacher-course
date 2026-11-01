@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getAdminClient } from '@/lib/supabase/admin'
+import { releaseExamSession } from '@/lib/rate-limit'
 
 export async function POST(
   request: Request,
@@ -9,7 +10,7 @@ export async function POST(
   try {
     const { token } = params
     const body = await request.json()
-    const { submission_id, final_answers } = body
+    const { submission_id, final_answers, paper_photos } = body
 
     if (!submission_id) {
       return NextResponse.json({ error: 'معرّف الجلسة مطلوب' }, { status: 400 })
@@ -103,11 +104,17 @@ export async function POST(
       const qMaxMarks = Number(item.marks_override ?? q.marks ?? 1)
       totalMaxScore += qMaxMarks
 
+      const isEssay = q.type === 'essay'
       const studentAns = studentAnswersMap.get(item.question_id)
-      let isCorrect = false
+      let isCorrect: boolean | null = false
+      let awardedMarks = 0
 
-      if (studentAns !== undefined && studentAns !== null) {
-        // v1 choice questions: correct is array of index or single index
+      if (isEssay) {
+        // Essay questions are marked manually by the teacher
+        isCorrect = null
+        awardedMarks = 0
+      } else if (studentAns !== undefined && studentAns !== null) {
+        // MCQ choice questions: auto-marked
         let correctArray: any[] = []
         if (Array.isArray(q.correct)) {
           correctArray = q.correct
@@ -115,19 +122,27 @@ export async function POST(
           correctArray = [q.correct]
         }
 
-        // Compare answer (supporting both single value or array)
         if (Array.isArray(studentAns)) {
           isCorrect =
             studentAns.length === correctArray.length &&
             studentAns.every((val) => correctArray.includes(val))
         } else {
-          // Compare as number/string
           isCorrect = correctArray.some((c) => String(c) === String(studentAns))
         }
+        awardedMarks = isCorrect ? qMaxMarks : 0
       }
 
-      const awardedMarks = isCorrect ? qMaxMarks : 0
       totalScore += awardedMarks
+
+      // Format answer payload (attach paper photos if this is an essay question and photos exist)
+      let answerToSave = studentAns ?? null
+      if (isEssay && Array.isArray(paper_photos) && paper_photos.length > 0) {
+        if (typeof answerToSave === 'object' && answerToSave !== null) {
+          answerToSave = { ...answerToSave, paper_photos }
+        } else {
+          answerToSave = { text: answerToSave || '', paper_photos }
+        }
+      }
 
       // Update answer record with result
       await adminClient
@@ -135,7 +150,7 @@ export async function POST(
         .upsert({
           submission_id,
           question_id: item.question_id,
-          answer: studentAns ?? null,
+          answer: answerToSave,
           is_correct: isCorrect,
           marks_awarded: awardedMarks,
         })
@@ -143,7 +158,7 @@ export async function POST(
 
     // 5. Finalize submission
     const submittedAt = new Date().toISOString()
-    const { error: updateSubError } = await adminClient
+    const { data: subData } = await adminClient
       .from('submissions')
       .update({
         submitted_at: submittedAt,
@@ -151,14 +166,18 @@ export async function POST(
         max_score: totalMaxScore,
       })
       .eq('id', submission_id)
+      .select('student_id')
+      .single()
 
-    if (updateSubError) {
-      console.error('[Exam Submit] Error updating submission:', updateSubError)
-      return NextResponse.json({ error: 'فشل حفظ نتيجة الاختبار' }, { status: 500 })
+    if (subData?.student_id) {
+      releaseExamSession(exam.id, subData.student_id)
     }
+
+    const hasEssayQuestions = examQuestions.some((eq: any) => eq.question?.type === 'essay')
 
     return NextResponse.json({
       success: true,
+      has_essay: hasEssayQuestions,
       results_released: exam.results_released,
       score: exam.results_released ? totalScore : null,
       max_score: exam.results_released ? totalMaxScore : null,

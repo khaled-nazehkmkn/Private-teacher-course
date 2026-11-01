@@ -11,6 +11,9 @@ import {
   Award,
   ZoomIn,
   X,
+  Camera,
+  Plus,
+  FileText,
 } from 'lucide-react'
 
 interface QuestionItem {
@@ -18,6 +21,7 @@ interface QuestionItem {
   body: string
   image_path?: string | null
   marks: number
+  type?: 'mcq' | 'essay'
   options: string[]
   saved_answer?: unknown
 }
@@ -54,7 +58,9 @@ export default function StudentExamPage({
   const [submissionId, setSubmissionId] = useState<string | null>(null)
   const [studentName, setStudentName] = useState<string>('')
   const [questions, setQuestions] = useState<QuestionItem[]>([])
-  const [selectedAnswers, setSelectedAnswers] = useState<Record<string, number>>({})
+  const [selectedAnswers, setSelectedAnswers] = useState<Record<string, any>>({})
+  const [paperPhotos, setPaperPhotos] = useState<string[]>([])
+  const [uploadingPhoto, setUploadingPhoto] = useState(false)
   const [secondsRemaining, setSecondsRemaining] = useState<number>(0)
   const [autosavingQuestionId, setAutosavingQuestionId] = useState<string | null>(null)
 
@@ -63,6 +69,7 @@ export default function StudentExamPage({
   const [submitting, setSubmitting] = useState(false)
   const [resultData, setResultData] = useState<{
     results_released: boolean
+    has_essay?: boolean
     score?: number | null
     max_score?: number | null
   } | null>(null)
@@ -120,10 +127,18 @@ export default function StudentExamPage({
     setStarting(true)
 
     try {
+      let deviceId = typeof window !== 'undefined' ? localStorage.getItem('exam_device_id') : null
+      if (!deviceId) {
+        deviceId = 'dev_' + Math.random().toString(36).substring(2, 12) + Date.now().toString(36)
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('exam_device_id', deviceId)
+        }
+      }
+
       const res = await fetch(`/api/exam/${token}/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ access_code: accessCode }),
+        body: JSON.stringify({ access_code: accessCode, device_id: deviceId }),
       })
 
       const data = await res.json()
@@ -188,6 +203,61 @@ export default function StudentExamPage({
     }
   }
 
+  // Handle essay text answer with autosave
+  const handleEssayChange = (questionId: string, text: string) => {
+    if (isSubmitted) return
+
+    setSelectedAnswers((prev) => ({
+      ...prev,
+      [questionId]: text,
+    }))
+
+    // Debounced autosave
+    setAutosavingQuestionId(questionId)
+    fetch(`/api/exam/${token}/answer`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        submission_id: submissionId,
+        question_id: questionId,
+        answer: text,
+      }),
+    })
+      .catch((e) => console.error('[Autosave Essay] Error:', e))
+      .finally(() => setAutosavingQuestionId(null))
+  }
+
+  // Handle uploading answer paper photos
+  const handleUploadPaperPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setUploadingPhoto(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('student_id', submissionId || 'student')
+
+      const res = await fetch(`/api/exam/${token}/upload-paper`, {
+        method: 'POST',
+        body: formData,
+      })
+
+      const data = await res.json()
+      if (res.ok && data.url) {
+        setPaperPhotos((prev) => [...prev, data.url])
+      } else {
+        alert(data.error || 'فشل رفع ورقة الإجابة')
+      }
+    } catch (err) {
+      console.error('[Upload Paper] Error:', err)
+      alert('حدث خطأ أثناء رفع ورقة الإجابة')
+    } finally {
+      setUploadingPhoto(false)
+      e.target.value = ''
+    }
+  }
+
   // Submit Exam
   const handleFinalSubmit = async () => {
     if (submitting || isSubmitted || !submissionId) return
@@ -200,6 +270,7 @@ export default function StudentExamPage({
         body: JSON.stringify({
           submission_id: submissionId,
           final_answers: selectedAnswers,
+          paper_photos: paperPhotos,
         }),
       })
 
@@ -261,6 +332,15 @@ export default function StudentExamPage({
           <p className="mt-2 text-xs sm:text-sm text-slate-600">
             شكراً لك، <span className="font-bold text-slate-800">{studentName}</span>. تم تسجيل إجاباتك بنجاح على الخادم.
           </p>
+
+          {resultData?.has_essay && (
+            <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50/80 p-4 text-xs font-bold text-amber-800">
+              <p>⏳ يتضمن هذا الاختبار أسئلة مقالية أو ورقية بانتظار مراجعة المعلم.</p>
+              <p className="mt-1 font-normal text-slate-600">
+                سيقوم المعلم بتصحيح إجاباتك ورصد الدرجات النهائية قريباً.
+              </p>
+            </div>
+          )}
 
           {resultData?.results_released ? (
             <div className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50/70 p-5 sm:p-6 text-emerald-900">
@@ -471,42 +551,115 @@ export default function StudentExamPage({
                 </div>
               )}
 
-              {/* Phone-Friendly Options (Minimum 48px Touch Height) */}
-              <div className="mt-3.5 space-y-2">
-                {q.options.map((option, optIdx) => {
-                  const isSelected = selectedOpt === optIdx
+              {/* Essay Question Input OR Phone-Friendly MCQ Options */}
+              {q.type === 'essay' ? (
+                <div className="mt-3.5 space-y-2">
+                  <label className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
+                    <FileText className="size-4 text-[#1d5ca8]" />
+                    <span>إجابة السؤال المقالي:</span>
+                  </label>
+                  <textarea
+                    rows={4}
+                    value={typeof selectedOpt === 'string' ? selectedOpt : selectedOpt?.text || ''}
+                    onChange={(e) => handleEssayChange(q.id, e.target.value)}
+                    placeholder="اكتب خطوات الحل أو الإجابة هنا، أو قم بحلها في ورقة خارجية وتصويرها بالأسفل..."
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50/50 p-3 text-xs sm:text-sm font-semibold outline-hidden focus:border-[#1d5ca8] focus:bg-white"
+                  />
+                  <p className="text-[11px] text-slate-400">
+                    يمكنك كتابة خطواتك هنا، كما يمكنك تصوير ورقة الإجابة في نهاية الامتحان.
+                  </p>
+                </div>
+              ) : (
+                <div className="mt-3.5 space-y-2">
+                  {q.options.map((option, optIdx) => {
+                    const isSelected = selectedOpt === optIdx
 
-                  return (
-                    <button
-                      key={optIdx}
-                      type="button"
-                      onClick={() => handleSelectOption(q.id, optIdx)}
-                      className={`flex min-h-[48px] w-full items-center justify-between rounded-xl border p-3 text-right text-xs sm:text-sm font-semibold transition active:scale-[0.99] ${
-                        isSelected
-                          ? 'border-[#1d5ca8] bg-[#eaf2ff] text-[#1d5ca8] shadow-xs'
-                          : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <span
-                          className={`grid size-6 shrink-0 place-items-center rounded-full text-xs font-bold ${
-                            isSelected
-                              ? 'bg-[#1d5ca8] text-white'
-                              : 'border border-slate-300 text-slate-500'
-                          }`}
-                        >
-                          {String.fromCharCode(65 + optIdx)}
-                        </span>
-                        <span className="break-words">{option}</span>
-                      </div>
-                      {isSelected && <CheckCircle2 className="size-4 shrink-0 text-[#1d5ca8]" />}
-                    </button>
-                  )
-                })}
-              </div>
+                    return (
+                      <button
+                        key={optIdx}
+                        type="button"
+                        onClick={() => handleSelectOption(q.id, optIdx)}
+                        className={`flex min-h-[48px] w-full items-center justify-between rounded-xl border p-3 text-right text-xs sm:text-sm font-semibold transition active:scale-[0.99] ${
+                          isSelected
+                            ? 'border-[#1d5ca8] bg-[#eaf2ff] text-[#1d5ca8] shadow-xs'
+                            : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <span
+                            className={`grid size-6 shrink-0 place-items-center rounded-full text-xs font-bold ${
+                              isSelected
+                                ? 'bg-[#1d5ca8] text-white'
+                                : 'border border-slate-300 text-slate-500'
+                            }`}
+                          >
+                            {String.fromCharCode(65 + optIdx)}
+                          </span>
+                          <span className="break-words">{option}</span>
+                        </div>
+                        {isSelected && <CheckCircle2 className="size-4 shrink-0 text-[#1d5ca8]" />}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
             </div>
           )
         })}
+
+        {/* Handwritten Paper Photos Section */}
+        <div className="rounded-2xl border border-blue-200 bg-blue-50/60 p-4 sm:p-5 shadow-xs">
+          <div className="flex items-center gap-2 text-[#153b68]">
+            <Camera className="size-5 text-[#1d5ca8]" />
+            <h3 className="text-sm font-extrabold">📸 رفع صور أوراق الحل اليدوي (اختياري)</h3>
+          </div>
+          <p className="mt-1 text-xs text-slate-500">
+            إذا قمت بحل الأسئلة المقالية أو الحسابية في ورقة وقلم، قم بتصويرها ورفعها هنا ليراجعها المعلم بدقة.
+          </p>
+
+          <div className="mt-3.5 flex flex-wrap gap-3 items-center">
+            {paperPhotos.map((url, idx) => (
+              <div key={idx} className="relative group size-20 rounded-xl overflow-hidden border border-slate-300 shadow-xs">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={url}
+                  alt={`ورقة ${idx + 1}`}
+                  className="size-full object-cover cursor-pointer hover:opacity-90"
+                  onClick={() => setZoomedImageUrl(url)}
+                />
+                <button
+                  type="button"
+                  onClick={() => setPaperPhotos((prev) => prev.filter((_, i) => i !== idx))}
+                  className="absolute top-1 right-1 grid size-5 place-items-center rounded-full bg-rose-600 text-white text-[10px] shadow-sm hover:bg-rose-700"
+                  title="حذف الصورة"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+
+            {paperPhotos.length < 5 && (
+              <label className="grid size-20 place-items-center rounded-xl border-2 border-dashed border-[#1d5ca8]/40 bg-white cursor-pointer hover:bg-blue-50/80 transition">
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  onChange={handleUploadPaperPhoto}
+                  className="hidden"
+                  disabled={uploadingPhoto}
+                />
+                {uploadingPhoto ? (
+                  <Loader2 className="size-5 animate-spin text-[#1d5ca8]" />
+                ) : (
+                  <div className="flex flex-col items-center text-[10px] font-bold text-[#1d5ca8]">
+                    <Plus className="size-5 mb-0.5" />
+                    <span>إضافة ورقة</span>
+                  </div>
+                )}
+              </label>
+            )}
+          </div>
+        </div>
 
         {/* Floating / Sticky Mobile Bottom Action Bar */}
         <div className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 p-3 backdrop-blur-md sm:static sm:border-none sm:bg-transparent sm:p-0">

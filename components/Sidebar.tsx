@@ -38,6 +38,7 @@ interface SidebarProps {
   onLogout: () => void
   absenceAlertsCount?: number
   pendingMakeupsCount?: number
+  remindersCount?: number
 }
 
 export function Sidebar({
@@ -51,6 +52,7 @@ export function Sidebar({
   onLogout,
   absenceAlertsCount = 0,
   pendingMakeupsCount = 0,
+  remindersCount = 0,
 }: SidebarProps) {
   const [changePasswordOpen, setChangePasswordOpen] = useState(false)
 
@@ -70,6 +72,12 @@ export function Sidebar({
       label: 'الحصص التعويضية',
       icon: CalendarClock,
       badge: pendingMakeupsCount > 0 ? pendingMakeupsCount : undefined,
+    },
+    {
+      id: 'التذكيرات',
+      label: 'التذكيرات',
+      icon: Bell,
+      badge: remindersCount > 0 ? remindersCount : undefined,
     },
     { id: 'بنك الأسئلة', label: 'بنك الأسئلة', icon: BookOpen },
     { id: 'الاختبارات', label: 'الاختبارات', icon: BarChart3 },

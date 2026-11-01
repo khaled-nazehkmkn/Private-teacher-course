@@ -29,6 +29,7 @@ import type { TeacherStatus } from '@/lib/teacher-status'
 import type { AbsenceRecord } from '@/components/absence/AbsenceView'
 import type { GroupItem } from '../groups/GroupsView'
 import type { StudentItem } from '../students/StudentsView'
+import type { ReminderItem } from '../reminders/RemindersView'
 
 export type AttendanceStatus = 'present' | 'late' | 'absent' | 'excused'
 
@@ -46,6 +47,7 @@ interface Props {
   students: StudentItem[]
   occurrences: OccurrenceItem[]
   absencesData?: Record<string, AbsenceRecord>
+  reminders?: ReminderItem[]
   onSaveAttendance: (
     occurrenceId: string,
     records: Array<{ student_id: string; status: AttendanceStatus; note?: string }>
@@ -65,6 +67,7 @@ export function AttendanceView({
   students,
   occurrences,
   absencesData,
+  reminders = [],
   onSaveAttendance,
   onToggleCancelOccurrence,
   onAddOccurrence,
@@ -87,9 +90,14 @@ export function AttendanceView({
   const [extraEndTime, setExtraEndTime] = useState('18:30')
   const [launchingExtra, setLaunchingExtra] = useState(false)
 
-  // Today helpers
+  // Today helpers (Safe local Cairo calendar date)
   const today = useMemo(() => new Date(), [])
-  const todayDateStr = useMemo(() => today.toISOString().split('T')[0], [today])
+  const todayDateStr = useMemo(() => {
+    const year = today.getFullYear()
+    const month = String(today.getMonth() + 1).padStart(2, '0')
+    const day = String(today.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+  }, [today])
   const todayWeekday = useMemo(() => today.getDay(), [today]) // 0 = Sunday, 6 = Saturday
 
   // Groups that have sessions scheduled for TODAY
@@ -454,6 +462,30 @@ export function AttendanceView({
                         من {timing.start_time.slice(0, 5)} إلى {timing.end_time.slice(0, 5)}
                       </span>
                     </div>
+
+                    {/* Active Group / Today Reminders */}
+                    {(() => {
+                      const groupRems = reminders.filter(
+                        (r) =>
+                          !r.completed &&
+                          (r.group_id === group.id || !r.group_id) &&
+                          r.remind_date <= todayDateStr
+                      )
+                      if (groupRems.length === 0) return null
+                      return (
+                        <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50/70 p-2.5 text-xs text-amber-900">
+                          <div className="flex items-center gap-1 font-bold text-amber-800">
+                            <Bell className="size-3.5 text-amber-600" />
+                            <span>تذكير لهذه الحصة:</span>
+                          </div>
+                          <ul className="mt-1 list-disc list-inside space-y-0.5 text-[11px] text-amber-800">
+                            {groupRems.map((r) => (
+                              <li key={r.id}>{r.title}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )
+                    })()}
                   </div>
 
                   <div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-3">

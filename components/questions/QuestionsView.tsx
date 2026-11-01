@@ -56,6 +56,7 @@ export const AI_PROMPT_TEMPLATE = `أنت معلم خبير ومصمم اختب�
 export interface QuestionBankItem {
   id: string
   body: string
+  type?: 'mcq' | 'essay'
   image_path?: string | null
   options: string[]
   correct: number[]
@@ -63,6 +64,7 @@ export interface QuestionBankItem {
   topic?: string | null
   grade?: string | null
   difficulty?: string | null
+  model_answer?: string | null
 }
 
 interface Props {
@@ -87,7 +89,9 @@ export function QuestionsView({
 
   // Manual Question Modal
   const [manualModalOpen, setManualModalOpen] = useState(false)
+  const [questionType, setQuestionType] = useState<'mcq' | 'essay'>('mcq')
   const [body, setBody] = useState('')
+  const [modelAnswer, setModelAnswer] = useState('')
   const [options, setOptions] = useState<string[]>(['', '', '', ''])
   const [correctIdx, setCorrectIdx] = useState(0)
   const [marks, setMarks] = useState(1)
@@ -95,6 +99,7 @@ export function QuestionsView({
   const [topic, setTopic] = useState('')
   const [difficulty, setDifficulty] = useState<'easy' | 'medium' | 'hard'>('medium')
   const [imageFile, setImageFile] = useState<File | null>(null)
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null)
   const [loadingAdd, setLoadingAdd] = useState(false)
 
   // Import Modal (JSON or Excel)
@@ -123,8 +128,8 @@ export function QuestionsView({
     if (!body.trim()) return
 
     const validOptions = options.map((o) => o.trim()).filter(Boolean)
-    if (validOptions.length < 2) {
-      alert('يجب كتابة خيارين على الأقل')
+    if (questionType === 'mcq' && validOptions.length < 2) {
+      alert('يجب كتابة خيارين على الأقل لأسئلة الاختيار من متعدد')
       return
     }
 
@@ -132,32 +137,48 @@ export function QuestionsView({
     try {
       let uploadedImagePath: string | undefined = undefined
 
-      if (imageFile && onUploadImage) {
-        const compressed = await compressImage(imageFile)
-        const fileName = `${Date.now()}-${imageFile.name.replace(/\s+/g, '_')}`
-        uploadedImagePath = await onUploadImage(compressed, fileName)
+      if (imageFile) {
+        try {
+          const compressed = await compressImage(imageFile)
+          const fileName = `${Date.now()}-${imageFile.name.replace(/\s+/g, '_')}`
+          if (onUploadImage) {
+            uploadedImagePath = await onUploadImage(compressed, fileName)
+          }
+        } catch (uploadErr) {
+          console.warn('[Question Image] Fallback to base64 Data URL:', uploadErr)
+          // Fallback directly to Data URL so it NEVER fails
+          uploadedImagePath = await new Promise<string>((resolve) => {
+            const reader = new FileReader()
+            reader.onloadend = () => resolve(reader.result as string)
+            reader.readAsDataURL(imageFile)
+          })
+        }
       }
 
       await onAddQuestion({
         body: body.trim(),
-        options: validOptions,
-        correct: [correctIdx >= validOptions.length ? 0 : correctIdx],
+        type: questionType,
+        options: questionType === 'mcq' ? validOptions : [],
+        correct: questionType === 'mcq' ? [correctIdx >= validOptions.length ? 0 : correctIdx] : [],
         marks,
         grade,
         topic: topic.trim() || undefined,
         difficulty,
         image_path: uploadedImagePath,
+        model_answer: questionType === 'essay' && modelAnswer.trim() ? modelAnswer.trim() : undefined,
       })
 
       // Reset form
       setBody('')
+      setModelAnswer('')
       setOptions(['', '', '', ''])
       setCorrectIdx(0)
       setImageFile(null)
+      setImagePreviewUrl(null)
       setManualModalOpen(false)
     } catch (err) {
       console.error(err)
-      alert('فشل حفظ السؤال')
+      alert('حدث خطأ أثناء حفظ السؤال، يرجى المحاولة مرة أخرى')
     } finally {
       setLoadingAdd(false)
     }
@@ -331,19 +352,24 @@ export function QuestionsView({
           >
             <div>
               <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5">
-                  <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-600">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className={`rounded-md px-2 py-0.5 text-xs font-bold ${
+                    q.type === 'essay' ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-700'
+                  }`}>
+                    {q.type === 'essay' ? 'سؤال مقالي' : 'اختيار من متعدد'}
+                  </span>
+                  <span className="rounded-md bg-blue-50 px-2 py-0.5 text-xs font-bold text-[#1d5ca8]">
                     {q.grade || 'عام'}
                   </span>
                   {q.topic && (
-                    <span className="rounded-md bg-blue-50 px-2 py-0.5 text-xs font-bold text-[#1d5ca8]">
+                    <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-600">
                       {q.topic}
                     </span>
                   )}
                 </div>
 
                 <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-bold text-slate-500">{q.marks} درجة</span>
+                  <span className="text-xs font-bold text-slate-500">{q.marks || 1} درجة</span>
                   <button
                     onClick={() => {
                       if (confirm('هل أنت متأكد من حذف هذا السؤال من البنك؟')) {
@@ -382,30 +408,44 @@ export function QuestionsView({
                 </div>
               )}
 
-              {/* Options */}
-              <div className="mt-3.5 space-y-1.5">
-                {q.options.map((opt, oIdx) => {
-                  const isCorrect = q.correct?.includes(oIdx)
-                  return (
-                    <div
-                      key={oIdx}
-                      className={`flex items-center justify-between rounded-xl px-3 py-2 text-xs font-semibold ${
-                        isCorrect
-                          ? 'border border-emerald-300 bg-emerald-50 text-emerald-800'
-                          : 'bg-slate-50 text-slate-600'
-                      }`}
-                    >
-                      <span>{opt}</span>
-                      {isCorrect && (
-                        <span className="flex items-center gap-1 text-[11px] font-bold text-emerald-700">
-                          <CheckCircle2 className="size-3.5" />
-                          إجابة صحيحة
-                        </span>
-                      )}
+              {/* Options or Essay Indicator */}
+              {q.type === 'essay' ? (
+                <div className="mt-3.5 rounded-xl border border-amber-200 bg-amber-50/60 p-3 text-xs">
+                  <div className="flex items-center gap-1.5 font-bold text-amber-800">
+                    <span>✍️ سؤال مقالي (تصحيح يدوي من المعلم)</span>
+                  </div>
+                  {q.model_answer && (
+                    <div className="mt-2 text-slate-700">
+                      <span className="font-bold text-slate-900">نموذج الإجابة: </span>
+                      {q.model_answer}
                     </div>
-                  )
-                })}
-              </div>
+                  )}
+                </div>
+              ) : (
+                <div className="mt-3.5 space-y-1.5">
+                  {(q.options || []).map((opt, oIdx) => {
+                    const isCorrect = q.correct?.includes(oIdx)
+                    return (
+                      <div
+                        key={oIdx}
+                        className={`flex items-center justify-between rounded-xl px-3 py-2 text-xs font-semibold ${
+                          isCorrect
+                            ? 'border border-emerald-300 bg-emerald-50 text-emerald-800'
+                            : 'bg-slate-50 text-slate-600'
+                        }`}
+                      >
+                        <span>{opt}</span>
+                        {isCorrect && (
+                          <span className="flex items-center gap-1 text-[11px] font-bold text-emerald-700">
+                            <CheckCircle2 className="size-3.5" />
+                            إجابة صحيحة
+                          </span>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
           </div>
         ))}
@@ -429,6 +469,35 @@ export function QuestionsView({
         maxWidth="max-w-2xl"
       >
         <form onSubmit={handleManualSubmit} className="space-y-4">
+          {/* Question Type Switcher */}
+          <div>
+            <label className="mb-1.5 block text-xs font-bold text-slate-700">نوع السؤال</label>
+            <div className="grid grid-cols-2 gap-2 rounded-xl bg-slate-100 p-1">
+              <button
+                type="button"
+                onClick={() => setQuestionType('mcq')}
+                className={`rounded-lg py-2 text-xs font-bold transition ${
+                  questionType === 'mcq'
+                    ? 'bg-white text-[#1d5ca8] shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                اختيار من متعدد (تصحيح تلقائي)
+              </button>
+              <button
+                type="button"
+                onClick={() => setQuestionType('essay')}
+                className={`rounded-lg py-2 text-xs font-bold transition ${
+                  questionType === 'essay'
+                    ? 'bg-white text-amber-700 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                سؤال مقالي (تصحيح يدوي ورقي/كتابي)
+              </button>
+            </div>
+          </div>
+
           <div>
             <label className="mb-1 block text-xs font-bold text-slate-700">نص السؤال</label>
             <textarea
@@ -441,34 +510,52 @@ export function QuestionsView({
             />
           </div>
 
-          {/* Options */}
-          <div className="space-y-2">
-            <label className="block text-xs font-bold text-slate-700">
-              خيارات الإجابة (حدد الإجابة الصحيحة):
-            </label>
-            {options.map((opt, idx) => (
-              <div key={idx} className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  name="correctOption"
-                  checked={correctIdx === idx}
-                  onChange={() => setCorrectIdx(idx)}
-                  className="size-4 text-[#1d5ca8]"
-                />
-                <input
-                  type="text"
-                  required={idx < 2}
-                  value={opt}
-                  onChange={(e) => {
-                    const val = e.target.value
-                    setOptions((prev) => prev.map((o, i) => (i === idx ? val : o)))
-                  }}
-                  placeholder={`الخيار ${idx + 1}`}
-                  className="w-full rounded-xl border border-slate-200 p-2 text-xs outline-hidden focus:border-[#1d5ca8]"
-                />
-              </div>
-            ))}
-          </div>
+          {/* Conditional: MCQ Options vs Essay Model Answer */}
+          {questionType === 'mcq' ? (
+            <div className="space-y-2">
+              <label className="block text-xs font-bold text-slate-700">
+                خيارات الإجابة (حدد الإجابة الصحيحة):
+              </label>
+              {options.map((opt, idx) => (
+                <div key={idx} className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="correctOption"
+                    checked={correctIdx === idx}
+                    onChange={() => setCorrectIdx(idx)}
+                    className="size-4 text-[#1d5ca8]"
+                  />
+                  <input
+                    type="text"
+                    required={idx < 2}
+                    value={opt}
+                    onChange={(e) => {
+                      const val = e.target.value
+                      setOptions((prev) => prev.map((o, i) => (i === idx ? val : o)))
+                    }}
+                    placeholder={`الخيار ${idx + 1}`}
+                    className="w-full rounded-xl border border-slate-200 p-2 text-xs outline-hidden focus:border-[#1d5ca8]"
+                  />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-1.5 rounded-xl border border-amber-200 bg-amber-50/50 p-3">
+              <label className="block text-xs font-bold text-amber-900">
+                نموذج الإجابة الاسترشادي (اختياري للمعلم أثناء التصحيح)
+              </label>
+              <textarea
+                rows={2}
+                value={modelAnswer}
+                onChange={(e) => setModelAnswer(e.target.value)}
+                placeholder="اكتب النقاط الرئيسية للإجابة الصحيحة أو معايير التقييم..."
+                className="w-full rounded-xl border border-amber-200 bg-white p-2.5 text-xs outline-hidden focus:border-amber-500"
+              />
+              <p className="text-[11px] text-amber-700">
+                💡 في الامتحان، يمكن للطالب كتابة الإجابة المقالية في خانة النص أو رفع صور لإجابته الورقية.
+              </p>
+            </div>
+          )}
 
           <div className="grid grid-cols-3 gap-3">
             <div>
@@ -503,7 +590,7 @@ export function QuestionsView({
               <input
                 type="number"
                 min="1"
-                max="20"
+                max="50"
                 value={marks}
                 onChange={(e) => setMarks(Number(e.target.value))}
                 className="w-full rounded-xl border border-slate-200 p-2 text-xs outline-hidden"
@@ -513,15 +600,39 @@ export function QuestionsView({
 
           {/* Optional image attachment */}
           <div>
-            <label className="mb-1 block text-xs font-bold text-slate-700">صورة توضيحية (اختياري)</label>
+            <label className="mb-1 block text-xs font-bold text-slate-700">صورة توضيحية / مسألة (اختياري)</label>
             <input
               type="file"
               accept="image/*"
-              onChange={(e) => setImageFile(e.target.files?.[0] || null)}
+              onChange={(e) => {
+                const f = e.target.files?.[0] || null
+                setImageFile(f)
+                if (f) {
+                  setImagePreviewUrl(URL.createObjectURL(f))
+                } else {
+                  setImagePreviewUrl(null)
+                }
+              }}
               className="text-xs text-slate-500"
             />
+            {imagePreviewUrl && (
+              <div className="mt-2 flex items-center gap-2">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={imagePreviewUrl} alt="معاينة" className="h-16 w-auto rounded-lg border object-contain" />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setImageFile(null)
+                    setImagePreviewUrl(null)
+                  }}
+                  className="rounded-lg bg-rose-50 px-2 py-1 text-[11px] font-bold text-rose-600 hover:bg-rose-100"
+                >
+                  إزالة الصورة
+                </button>
+              </div>
+            )}
             <p className="mt-1 text-[11px] text-slate-400">
-              يتم ضغط الصورة تلقائياً لتوفير مساحة التخزين.
+              يتم ضغط الصورة تلقائياً لتوفير مساحة التخزين وتكون بحجم مناسب ومقروء للطالب.
             </p>
           </div>
 

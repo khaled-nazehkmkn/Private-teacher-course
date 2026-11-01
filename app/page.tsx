@@ -19,6 +19,7 @@ import { AbsenceView, type AbsenceRecord } from '@/components/absence/AbsenceVie
 import { MakeupView, type MakeupRequestItem } from '@/components/makeup/MakeupView'
 import { QuestionsView, type QuestionBankItem } from '@/components/questions/QuestionsView'
 import { ExamsView, type ExamItem, type ExamSubmissionDetail } from '@/components/exams/ExamsView'
+import { RemindersView, type ReminderItem } from '@/components/reminders/RemindersView'
 import { ReportsView } from '@/components/reports/ReportsView'
 import { MessageLogView, type MessageLogItem } from '@/components/messages/MessageLogView'
 import { AdminView, type AdminTeacherItem } from '@/components/admin/AdminView'
@@ -138,6 +139,7 @@ export default function TeacherAppPage() {
   const [makeupRequests, setMakeupRequests] = useState<MakeupRequestItem[]>([])
   const [questions, setQuestions] = useState<QuestionBankItem[]>(INITIAL_QUESTIONS)
   const [exams, setExams] = useState<ExamItem[]>([])
+  const [reminders, setReminders] = useState<ReminderItem[]>([])
   const [messageLogs, setMessageLogs] = useState<MessageLogItem[]>([])
   const [adminTeachers, setAdminTeachers] = useState<AdminTeacherItem[]>([])
 
@@ -269,6 +271,7 @@ export default function TeacherAppPage() {
             qData.map((q: any) => ({
               id: q.id,
               body: q.body,
+              type: q.type || 'mcq',
               image_path: q.image_path,
               options: Array.isArray(q.options) ? q.options : [],
               correct: Array.isArray(q.correct) ? q.correct : [0],
@@ -276,6 +279,7 @@ export default function TeacherAppPage() {
               grade: q.grade,
               topic: q.topic,
               difficulty: q.difficulty,
+              model_answer: q.model_answer,
             }))
           )
         }
@@ -305,7 +309,7 @@ export default function TeacherAppPage() {
           )
         }
 
-        // Fetch Message Log
+        // Fetch Message Log & Reminders
         const { data: mlData } = await supabase
           .from('message_log')
           .select('*, student:students(full_name)')
@@ -322,36 +326,73 @@ export default function TeacherAppPage() {
               created_at: m.created_at,
             }))
           )
+
+          const loadedReminders: ReminderItem[] = []
+          mlData.forEach((m: any) => {
+            if (m.kind === 'custom') {
+              try {
+                const parsed = JSON.parse(m.body)
+                if (parsed && parsed.is_reminder) {
+                  loadedReminders.push({
+                    id: m.id,
+                    title: parsed.title,
+                    group_id: parsed.group_id || null,
+                    group_name: parsed.group_name || null,
+                    remind_date: parsed.remind_date,
+                    remind_time: parsed.remind_time,
+                    notes: parsed.notes,
+                    completed: Boolean(parsed.completed),
+                    created_at: m.created_at,
+                  })
+                }
+              } catch (_) {}
+            }
+          })
+          setReminders(loadedReminders)
         }
 
-        // Fetch Absences from student_absences view
+        // Fetch Absences with Bulletproof Fallback
         const { data: absData, error: absError } = await supabase
           .from('student_absences')
           .select('student_id, session_date, occurrence_id')
           .order('session_date', { ascending: true })
 
-        if (absError) {
-          console.error('[App] Absences fetch error:', absError)
-        } else if (absData) {
-          const map: Record<string, AbsenceRecord> = {}
-          if (studentsData) {
-            studentsData.forEach((st: any) => {
-              map[st.id] = { student_id: st.id, dates: [], consecutive: 0 }
-            })
+        let effectiveAbsData = absData || []
+        if (absError || !absData || absData.length === 0) {
+          const { data: directAtt } = await supabase
+            .from('attendance')
+            .select('student_id, occurrence_id, session_occurrences(session_date, status)')
+            .eq('status', 'absent')
+
+          if (directAtt && directAtt.length > 0) {
+            effectiveAbsData = directAtt
+              .filter((r: any) => r.session_occurrences?.status !== 'cancelled')
+              .map((r: any) => ({
+                student_id: r.student_id,
+                occurrence_id: r.occurrence_id,
+                session_date: r.session_occurrences?.session_date,
+              }))
           }
-          absData.forEach((row: any) => {
-            if (!map[row.student_id]) {
-              map[row.student_id] = { student_id: row.student_id, dates: [], consecutive: 0 }
-            }
-            if (!map[row.student_id].dates.includes(row.session_date)) {
-              map[row.student_id].dates.push(row.session_date)
-            }
-          })
-          Object.values(map).forEach((rec) => {
-            rec.consecutive = rec.dates.length
-          })
-          setAbsencesData(map)
         }
+
+        const map: Record<string, AbsenceRecord> = {}
+        if (studentsData) {
+          studentsData.forEach((st: any) => {
+            map[st.id] = { student_id: st.id, dates: [], consecutive: 0 }
+          })
+        }
+        effectiveAbsData.forEach((row: any) => {
+          if (!map[row.student_id]) {
+            map[row.student_id] = { student_id: row.student_id, dates: [], consecutive: 0 }
+          }
+          if (row.session_date && !map[row.student_id].dates.includes(row.session_date)) {
+            map[row.student_id].dates.push(row.session_date)
+          }
+        })
+        Object.values(map).forEach((rec) => {
+          rec.consecutive = rec.dates.length
+        })
+        setAbsencesData(map)
 
         // Fetch Admin Teachers if Admin
         if (tRow?.is_admin) {
@@ -442,6 +483,158 @@ export default function TeacherAppPage() {
     const supabase = createClient()
     await supabase.from('groups').delete().eq('id', groupId)
     setGroups((prev) => prev.filter((g) => g.id !== groupId))
+  }
+
+  const handleUpdateGroup = async (
+    groupId: string,
+    updatedData: {
+      name: string
+      grade: string
+      capacity: number
+      sessions: Array<{ weekday: number; start_time: string; end_time: string }>
+    }
+  ) => {
+    const supabase = createClient()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (user) {
+      await supabase
+        .from('groups')
+        .update({
+          name: updatedData.name,
+          grade: updatedData.grade,
+          capacity: updatedData.capacity,
+        })
+        .eq('id', groupId)
+
+      await supabase.from('group_sessions').delete().eq('group_id', groupId)
+
+      if (updatedData.sessions.length > 0) {
+        await supabase.from('group_sessions').insert(
+          updatedData.sessions.map((s) => ({
+            group_id: groupId,
+            weekday: s.weekday,
+            start_time: s.start_time,
+            end_time: s.end_time,
+          }))
+        )
+
+        const occs = generateOccurrencesForWeeks({
+          weeklySessions: updatedData.sessions,
+          weeksAhead: 4,
+          weeksBehind: 1,
+        })
+        if (occs.length > 0) {
+          await supabase.from('session_occurrences').upsert(
+            occs.map((o) => ({
+              teacher_id: user.id,
+              group_id: groupId,
+              session_date: o.session_date,
+              start_time: o.start_time,
+              end_time: o.end_time,
+              status: 'held',
+            })),
+            { onConflict: 'group_id,session_date,start_time' }
+          )
+        }
+      }
+      await loadData()
+      return
+    }
+
+    setGroups((prev) =>
+      prev.map((g) => (g.id === groupId ? { ...g, ...updatedData } : g))
+    )
+  }
+
+  // Reminder Handlers
+  const handleAddReminder = async (rem: Omit<ReminderItem, 'id' | 'created_at'>) => {
+    const supabase = createClient()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    const reminderPayload = {
+      is_reminder: true,
+      title: rem.title,
+      group_id: rem.group_id,
+      group_name: rem.group_name,
+      remind_date: rem.remind_date,
+      remind_time: rem.remind_time,
+      notes: rem.notes,
+      completed: false,
+    }
+
+    if (user) {
+      const { data: inserted, error } = await supabase
+        .from('message_log')
+        .insert({
+          teacher_id: user.id,
+          kind: 'custom',
+          body: JSON.stringify(reminderPayload),
+        })
+        .select()
+        .single()
+
+      if (!error && inserted) {
+        setReminders((prev) => [
+          {
+            id: inserted.id,
+            ...rem,
+            created_at: inserted.created_at,
+          },
+          ...prev,
+        ])
+        return
+      }
+    }
+
+    const localItem: ReminderItem = {
+      id: `rem-${Date.now()}`,
+      ...rem,
+      created_at: new Date().toISOString(),
+    }
+    setReminders((prev) => [localItem, ...prev])
+  }
+
+  const handleToggleReminder = async (id: string, currentCompleted: boolean) => {
+    const target = reminders.find((r) => r.id === id)
+    if (!target) return
+    const updatedCompleted = !currentCompleted
+
+    const supabase = createClient()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (user) {
+      const updatedPayload = {
+        is_reminder: true,
+        title: target.title,
+        group_id: target.group_id,
+        group_name: target.group_name,
+        remind_date: target.remind_date,
+        remind_time: target.remind_time,
+        notes: target.notes,
+        completed: updatedCompleted,
+      }
+      await supabase
+        .from('message_log')
+        .update({ body: JSON.stringify(updatedPayload) })
+        .eq('id', id)
+    }
+
+    setReminders((prev) =>
+      prev.map((r) => (r.id === id ? { ...r, completed: updatedCompleted } : r))
+    )
+  }
+
+  const handleDeleteReminder = async (id: string) => {
+    const supabase = createClient()
+    await supabase.from('message_log').delete().eq('id', id)
+    setReminders((prev) => prev.filter((r) => r.id !== id))
   }
 
   // Handlers for Students
@@ -633,13 +826,15 @@ export default function TeacherAppPage() {
       await supabase.from('questions').insert({
         teacher_id: user.id,
         body: qData.body,
-        options: qData.options as any,
-        correct: qData.correct as any,
+        type: qData.type || 'mcq',
+        options: (qData.options || []) as any,
+        correct: (qData.correct || []) as any,
         marks: qData.marks,
         grade: qData.grade,
         topic: qData.topic,
         difficulty: qData.difficulty,
         image_path: qData.image_path,
+        model_answer: qData.model_answer || null,
       })
       await loadData()
       return
@@ -666,13 +861,15 @@ export default function TeacherAppPage() {
         qList.map((q) => ({
           teacher_id: user.id,
           body: q.body,
-          options: q.options as any,
-          correct: q.correct as any,
+          type: q.type || 'mcq',
+          options: (q.options || []) as any,
+          correct: (q.correct || []) as any,
           marks: q.marks,
           grade: q.grade,
           topic: q.topic,
           difficulty: q.difficulty,
           image_path: q.image_path,
+          model_answer: q.model_answer || null,
         }))
       )
       await loadData()
@@ -693,20 +890,27 @@ export default function TeacherAppPage() {
   }
 
   const handleUploadImage = async (fileBlob: Blob, fileName: string): Promise<string> => {
-    const supabase = createClient()
-    const { data, error } = await supabase.storage
-      .from('question-images')
-      .upload(fileName, fileBlob, { upsert: true })
-
-    if (error) {
-      console.error('[Storage Upload] Error:', error)
-      throw error
+    try {
+      const formData = new FormData()
+      formData.append('file', fileBlob, fileName)
+      const res = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+      })
+      if (res.ok) {
+        const json = await res.json()
+        if (json.url) return json.url
+      }
+    } catch (err) {
+      console.warn('[Image Upload] Server API error, falling back to Data URL:', err)
     }
 
-    const {
-      data: { publicUrl },
-    } = supabase.storage.from('question-images').getPublicUrl(data.path)
-    return publicUrl
+    // Direct Data URL fallback
+    return new Promise<string>((resolve) => {
+      const reader = new FileReader()
+      reader.onloadend = () => resolve(reader.result as string)
+      reader.readAsDataURL(fileBlob)
+    })
   }
 
   // Exams Handlers
@@ -976,6 +1180,7 @@ export default function TeacherAppPage() {
           Object.values(absencesData).filter((a) => a.dates.length >= 3 || a.consecutive >= 2).length
         }
         pendingMakeupsCount={makeupRequests.filter((m) => m.status === 'pending').length}
+        remindersCount={reminders.filter((r) => !r.completed).length}
       />
 
       {/* Main Content Area */}
@@ -1009,6 +1214,7 @@ export default function TeacherAppPage() {
             <GroupsView
               groups={groups}
               onAddGroup={handleAddGroup}
+              onUpdateGroup={handleUpdateGroup}
               onDeleteGroup={handleDeleteGroup}
               teacherStatus={teacherStatus}
             />
@@ -1032,6 +1238,7 @@ export default function TeacherAppPage() {
               students={students}
               occurrences={occurrences}
               absencesData={absencesData}
+              reminders={reminders}
               onSaveAttendance={handleSaveAttendance}
               onToggleCancelOccurrence={handleToggleCancelOccurrence}
               onAddOccurrence={handleAddOccurrence}
@@ -1058,6 +1265,17 @@ export default function TeacherAppPage() {
               occurrences={occurrences}
               onCreateRequest={handleCreateMakeupRequest}
               onUpdateStatus={handleUpdateMakeupStatus}
+              teacherStatus={teacherStatus}
+            />
+          )}
+
+          {activeTab === 'التذكيرات' && (
+            <RemindersView
+              reminders={reminders}
+              groups={groups}
+              onAddReminder={handleAddReminder}
+              onToggleReminder={handleToggleReminder}
+              onDeleteReminder={handleDeleteReminder}
               teacherStatus={teacherStatus}
             />
           )}

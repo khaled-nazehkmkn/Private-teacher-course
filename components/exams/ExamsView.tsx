@@ -19,6 +19,11 @@ import {
   XCircle,
   Loader2,
   Trash2,
+  Printer,
+  Edit3,
+  ZoomIn,
+  FileText,
+  Image as ImageIcon,
 } from 'lucide-react'
 import { Modal } from '@/components/ui/modal'
 import { DateTimePicker } from '@/components/ui/datetime-picker'
@@ -117,6 +122,87 @@ export function ExamsView({
   const [randomCount, setRandomCount] = useState(10)
   const [selectedQuestionIds, setSelectedQuestionIds] = useState<string[]>([])
   const [savingExam, setSavingExam] = useState(false)
+
+  // Print PDF Modal
+  const [printModalOpen, setPrintModalOpen] = useState(false)
+  const [printExam, setPrintExam] = useState<ExamItem | null>(null)
+
+  // Grading Modal
+  const [gradingModalOpen, setGradingModalOpen] = useState(false)
+  const [gradingSubmission, setGradingSubmission] = useState<ExamSubmissionDetail | null>(null)
+  const [gradingData, setGradingData] = useState<any>(null)
+  const [loadingGrading, setLoadingGrading] = useState(false)
+  const [awardedMarksMap, setAwardedMarksMap] = useState<Record<string, number>>({})
+  const [feedbackMap, setFeedbackMap] = useState<Record<string, string>>({})
+  const [savingGradeId, setSavingGradeId] = useState<string | null>(null)
+  const [previewZoomImage, setPreviewZoomImage] = useState<string | null>(null)
+
+  const handleOpenPrintPdf = (exam: ExamItem) => {
+    setPrintExam(exam)
+    setPrintModalOpen(true)
+  }
+
+  const handleOpenGrading = async (sub: ExamSubmissionDetail) => {
+    setGradingSubmission(sub)
+    setGradingModalOpen(true)
+    setLoadingGrading(true)
+    try {
+      const res = await fetch(`/api/exam/submission/${sub.id}`)
+      if (!res.ok) throw new Error('فشل جلب تفاصيل الإجابات')
+      const data = await res.json()
+      setGradingData(data)
+      const initialMarks: Record<string, number> = {}
+      const initialFeedback: Record<string, string> = {}
+      data.questions?.forEach((q: any) => {
+        initialMarks[q.id] = q.marks_awarded !== null ? Number(q.marks_awarded) : 0
+        if (q.student_answer?.teacher_feedback) {
+          initialFeedback[q.id] = q.student_answer.teacher_feedback
+        }
+      })
+      setAwardedMarksMap(initialMarks)
+      setFeedbackMap(initialFeedback)
+    } catch (err) {
+      console.error(err)
+      alert('حدث خطأ أثناء تحميل إجابات الطالب')
+    } finally {
+      setLoadingGrading(false)
+    }
+  }
+
+  const handleSaveQuestionGrade = async (questionId: string) => {
+    if (!gradingSubmission) return
+    setSavingGradeId(questionId)
+    try {
+      const marks = awardedMarksMap[questionId] ?? 0
+      const feedback = feedbackMap[questionId] || ''
+      const res = await fetch('/api/exam/grade', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          submission_id: gradingSubmission.id,
+          question_id: questionId,
+          marks_awarded: marks,
+          feedback,
+        }),
+      })
+      const result = await res.json()
+      if (!res.ok) throw new Error(result.error || 'فشل حفظ الدرجة')
+
+      if (result.new_total_score !== undefined) {
+        setSubmissionsList((prev) =>
+          prev.map((s) =>
+            s.id === gradingSubmission.id ? { ...s, score: result.new_total_score } : s
+          )
+        )
+      }
+      alert('تم حفظ واعتماد درجة السؤال بنجاح ✓')
+    } catch (err) {
+      console.error(err)
+      alert('فشل حفظ الدرجة')
+    } finally {
+      setSavingGradeId(null)
+    }
+  }
 
   // Handle Open Results Analysis Modal
   const handleOpenResults = async (exam: ExamItem) => {
@@ -313,6 +399,15 @@ export function ExamsView({
                 </button>
 
                 <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleOpenPrintPdf(exam)}
+                    className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-100"
+                    title="تصدير وطباعة ورقة الامتحان PDF"
+                  >
+                    <Printer className="size-3.5 text-[#1d5ca8]" />
+                    <span>طباعة PDF</span>
+                  </button>
+
                   <button
                     onClick={() => {
                       setActiveShareExam(exam)
@@ -564,7 +659,7 @@ export function ExamsView({
                       <th className="p-3">الدرجة</th>
                       <th className="p-3">النسبة</th>
                       <th className="p-3">وقت التسليم</th>
-                      <th className="p-3 text-center">إرسال النتيجة لواتساب</th>
+                      <th className="p-3 text-center">إجراءات والتصحيح</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -596,15 +691,26 @@ export function ExamsView({
                             })}
                           </td>
                           <td className="p-3 text-center">
-                            <button
-                              onClick={() =>
-                                handleSendResultWhatsApp(sub, selectedExamForResults?.title || '')
-                              }
-                              className="inline-flex items-center gap-1 rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-700 shadow-xs"
-                            >
-                              <MessageCircle className="size-3.5" />
-                              <span>إرسال لولي الأمر</span>
-                            </button>
+                            <div className="flex items-center justify-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => handleOpenGrading(sub)}
+                                className="inline-flex items-center gap-1 rounded-xl bg-[#1d5ca8] px-2.5 py-1.5 text-xs font-bold text-white hover:bg-[#164e93] shadow-xs"
+                              >
+                                <Edit3 className="size-3.5" />
+                                <span>مراجعة وتصحيح</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleSendResultWhatsApp(sub, selectedExamForResults?.title || '')
+                                }
+                                className="inline-flex items-center gap-1 rounded-xl bg-emerald-600 px-2.5 py-1.5 text-xs font-bold text-white hover:bg-emerald-700 shadow-xs"
+                              >
+                                <MessageCircle className="size-3.5" />
+                                <span>واتساب</span>
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       )
@@ -623,6 +729,389 @@ export function ExamsView({
             </div>
           )}
         </div>
+      </Modal>
+
+      {/* Print PDF Paper Exam Modal */}
+      <Modal
+        isOpen={printModalOpen}
+        onClose={() => setPrintModalOpen(false)}
+        title="معاينة وطباعة ورقة الاختبار (تصدير PDF)"
+        maxWidth="max-w-4xl"
+      >
+        {printExam && (
+          <div className="space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl bg-blue-50 p-4 border border-blue-200 text-xs text-[#153b68] print:hidden">
+              <div>
+                <p className="font-bold">
+                  💡 يمكنك طباعة ورقة الاختبار أو حفظها كملف PDF قابل للطباعة والتوزيع على الطلاب.
+                </p>
+                <p className="mt-0.5 text-slate-500">
+                  عند فتح نافذة الطباعة، اختر الوجهة <strong>"حفظ بتنسيق PDF (Save as PDF)"</strong> لتنزيل الورقة مباشرة.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-[#1d5ca8] px-5 py-2.5 text-xs font-bold text-white shadow-md hover:bg-[#164e93] transition active:scale-95"
+              >
+                <Printer className="size-4" />
+                <span>طباعة ورقة الاختبار (Print / PDF)</span>
+              </button>
+            </div>
+
+            {/* Printable Paper Exam Container */}
+            <div
+              id="printable-exam-sheet"
+              className="rounded-2xl border border-slate-300 bg-white p-6 sm:p-10 text-slate-900 shadow-sm print:m-0 print:border-none print:p-0 print:shadow-none"
+            >
+              {/* Official Exam Header */}
+              <div className="border-b-2 border-slate-800 pb-4">
+                <div className="flex items-start justify-between">
+                  <div className="text-right text-xs font-bold space-y-1">
+                    <p>جمهورية مصر العربية</p>
+                    <p>إدارة التعليم الخاص والتفوق</p>
+                    <p>المعلم: {teacherName}</p>
+                  </div>
+
+                  <div className="text-center">
+                    <h2 className="text-lg sm:text-xl font-black text-slate-900">
+                      {printExam.title}
+                    </h2>
+                    <p className="mt-1 text-xs font-bold text-slate-600">
+                      {printExam.grade || 'المرحلة الدراسية'} • العام الدراسي ٢٠٢٥ / ٢٠٢٦
+                    </p>
+                  </div>
+
+                  <div className="text-left text-xs font-bold space-y-1" dir="ltr">
+                    <p>الزمن: {printExam.duration_min} دقيقة</p>
+                    <p>الدرجة الكلية: {printExam.question_ids.length * 2} درجة</p>
+                  </div>
+                </div>
+
+                {/* Student Details Box */}
+                <div className="mt-4 grid grid-cols-2 gap-3 rounded-xl border border-slate-400 p-3 text-xs font-bold">
+                  <div>
+                    <span>اسم الطالب: </span>
+                    <span className="text-slate-400 font-normal">....................................................................</span>
+                  </div>
+                  <div>
+                    <span>المجموعة: </span>
+                    <span className="text-slate-400 font-normal">....................................................</span>
+                  </div>
+                  <div>
+                    <span>تاريخ الاختبار: </span>
+                    <span className="text-slate-400 font-normal">...... / ...... / ٢٠٢...</span>
+                  </div>
+                  <div className="flex items-center justify-end gap-1">
+                    <span>الدرجة المستحقة: </span>
+                    <span className="inline-block w-16 border-b border-black text-center">/</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Exam Questions */}
+              <div className="mt-6 space-y-6">
+                {questions
+                  .filter((q) => printExam.question_ids.includes(q.id))
+                  .map((q, idx) => (
+                    <div key={q.id} className="break-inside-avoid border-b border-slate-100 pb-5">
+                      <div className="flex items-start justify-between gap-3">
+                        <h4 className="text-sm font-bold text-slate-900 leading-relaxed">
+                          <span className="ml-1.5 font-black text-slate-950">س {idx + 1}:</span>
+                          {q.body}
+                        </h4>
+                        <span className="shrink-0 rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-600">
+                          ({q.marks || 1} درجات)
+                        </span>
+                      </div>
+
+                      {/* Optional Question Image */}
+                      {q.image_path && (
+                        <div className="mt-3 flex justify-center">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={q.image_path}
+                            alt={`سؤال ${idx + 1}`}
+                            className="max-h-48 w-auto rounded-lg border border-slate-200 object-contain"
+                          />
+                        </div>
+                      )}
+
+                      {/* Question Content: MCQ vs Essay */}
+                      {q.type === 'essay' ? (
+                        <div className="mt-4 space-y-3 pl-2">
+                          <p className="text-[11px] font-bold text-slate-400">إجابة السؤال (أجب في المساحة المخصصة موضحاً خطوات الحل):</p>
+                          <div className="space-y-3.5 border-r-2 border-slate-200 pr-3">
+                            <div className="border-b border-dashed border-slate-300 h-5" />
+                            <div className="border-b border-dashed border-slate-300 h-5" />
+                            <div className="border-b border-dashed border-slate-300 h-5" />
+                            <div className="border-b border-dashed border-slate-300 h-5" />
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                          {q.options?.map((opt, oIdx) => {
+                            const letters = ['أ', 'ب', 'ج', 'د', 'هـ']
+                            return (
+                              <div
+                                key={oIdx}
+                                className="flex items-center gap-2 rounded-lg border border-slate-200 p-2 font-medium"
+                              >
+                                <span className="flex size-5 shrink-0 items-center justify-center rounded-full border border-slate-400 text-[10px] font-bold">
+                                  {letters[oIdx] || oIdx + 1}
+                                </span>
+                                <span>{opt}</span>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+              </div>
+
+              {/* Paper Footer */}
+              <div className="mt-8 border-t-2 border-slate-800 pt-4 text-center text-xs font-bold text-slate-700">
+                <p>« مع أطيب التمنيات لجميع أبنائنا وبناتنا الطلاب بدوام التفوق والنجاح »</p>
+                <p className="mt-1 text-[11px] text-slate-500">مع تحيات: {teacherName}</p>
+              </div>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Manual Grading & Submission Review Modal */}
+      <Modal
+        isOpen={gradingModalOpen}
+        onClose={() => {
+          setGradingModalOpen(false)
+          setGradingSubmission(null)
+          setGradingData(null)
+        }}
+        title={`مراجعة وتصحيح إجابات الطالب: ${gradingSubmission?.student_name || ''}`}
+        maxWidth="max-w-3xl"
+      >
+        {loadingGrading ? (
+          <div className="flex flex-col items-center justify-center p-12 text-xs font-bold text-[#1d5ca8]">
+            <Loader2 className="size-6 animate-spin" />
+            <p className="mt-2">جاري تحميل إجابات وورقة الطالب...</p>
+          </div>
+        ) : gradingData ? (
+          <div className="space-y-6">
+            {/* Student Summary Bar */}
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-slate-50 p-4 border border-slate-200 text-xs">
+              <div>
+                <p className="text-slate-400 font-bold">الطالب:</p>
+                <h3 className="text-base font-black text-slate-900">
+                  {gradingData.submission?.student?.full_name}
+                </h3>
+              </div>
+              <div>
+                <p className="text-slate-400 font-bold">المرحلة:</p>
+                <p className="font-bold text-slate-700">
+                  {gradingData.submission?.student?.grade || 'غير محدد'}
+                </p>
+              </div>
+              <div>
+                <p className="text-slate-400 font-bold">الدرجة الإجمالية الحالية:</p>
+                <p className="text-lg font-black text-[#1d5ca8]">
+                  {gradingData.submission?.score} / {gradingData.submission?.max_score}
+                </p>
+              </div>
+            </div>
+
+            {/* Questions List with Answers & Grading */}
+            <div className="space-y-4">
+              {gradingData.questions?.map((q: any, idx: number) => {
+                const studentAns = q.student_answer
+                const isEssay = q.type === 'essay'
+                const paperPhotos: string[] = studentAns?.paper_photos || []
+
+                return (
+                  <div
+                    key={q.id}
+                    className="rounded-2xl border border-slate-200 bg-white p-4 shadow-2xs space-y-3"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="rounded-lg bg-slate-100 px-2 py-0.5 text-xs font-black text-slate-700">
+                          سؤال {idx + 1}
+                        </span>
+                        <span
+                          className={`rounded-lg px-2 py-0.5 text-[11px] font-bold ${
+                            isEssay ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-[#1d5ca8]'
+                          }`}
+                        >
+                          {isEssay ? 'سؤال مقالي' : 'اختيار من متعدد'}
+                        </span>
+                      </div>
+
+                      <span className="text-xs font-bold text-slate-500">
+                        الدرجة القصوى: {q.marks}
+                      </span>
+                    </div>
+
+                    {/* Question Body */}
+                    <p className="text-sm font-bold text-slate-900 leading-relaxed">{q.body}</p>
+
+                    {/* Question Image */}
+                    {q.image_path && (
+                      <div className="flex justify-center">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={q.image_path}
+                          alt="سؤال"
+                          className="max-h-36 rounded-lg border object-contain"
+                        />
+                      </div>
+                    )}
+
+                    {/* MCQ Case */}
+                    {!isEssay && (
+                      <div className="rounded-xl bg-slate-50 p-3 text-xs space-y-1.5">
+                        <p className="font-bold text-slate-700">إجابة الطالب:</p>
+                        <div className="flex items-center gap-2">
+                          {q.is_correct ? (
+                            <span className="inline-flex items-center gap-1 font-bold text-emerald-700">
+                              <CheckCircle2 className="size-4" />
+                              <span>
+                                صحيحة: {q.options?.[studentAns?.selected_index] || 'الخيار المحدد'}
+                              </span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 font-bold text-rose-600">
+                              <XCircle className="size-4" />
+                              <span>
+                                خاطئة: {q.options?.[studentAns?.selected_index] || 'إجابة غير صحيحة'} (الإجابة الصحيحة: {q.options?.[q.correct?.[0]]})
+                              </span>
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-slate-400">
+                          الدرجة المرصودة آلياً: {q.marks_awarded} من {q.marks}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Essay Case */}
+                    {isEssay && (
+                      <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-3.5 text-xs space-y-3">
+                        {/* Written Text Answer */}
+                        <div>
+                          <p className="font-bold text-slate-800">إجابة الطالب المكتوبة (نصياً):</p>
+                          <p className="mt-1 rounded-lg bg-white p-2.5 text-slate-900 border border-amber-200/80 whitespace-pre-wrap font-medium">
+                            {studentAns?.text || studentAns?.essay || 'لم يكتب إجابة نصية'}
+                          </p>
+                        </div>
+
+                        {/* Uploaded Handwritten Paper Photos */}
+                        {paperPhotos.length > 0 && (
+                          <div>
+                            <p className="font-bold text-slate-800">صور ورقة الإجابة المرفوعة من الطالب ({paperPhotos.length} صورة):</p>
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              {paperPhotos.map((photoUrl, pIdx) => (
+                                <div
+                                  key={pIdx}
+                                  onClick={() => setPreviewZoomImage(photoUrl)}
+                                  className="group relative cursor-pointer overflow-hidden rounded-xl border border-slate-300 bg-black/5"
+                                >
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img
+                                    src={photoUrl}
+                                    alt={`ورقة ${pIdx + 1}`}
+                                    className="h-24 w-24 object-cover transition group-hover:scale-105"
+                                  />
+                                  <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition">
+                                    <ZoomIn className="size-4 text-white" />
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Teacher Grading Inputs */}
+                        <div className="rounded-xl bg-white p-3 border border-amber-200 space-y-2.5">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <label className="font-bold text-slate-800">
+                              رصد درجة السؤال المقالي:
+                            </label>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="number"
+                                min="0"
+                                max={q.marks}
+                                value={awardedMarksMap[q.id] ?? 0}
+                                onChange={(e) =>
+                                  setAwardedMarksMap((prev) => ({
+                                    ...prev,
+                                    [q.id]: Number(e.target.value),
+                                  }))
+                                }
+                                className="w-16 rounded-lg border border-slate-300 p-1.5 text-center font-bold text-sm outline-hidden focus:border-[#1d5ca8]"
+                              />
+                              <span className="font-bold text-slate-600">من {q.marks} درجة</span>
+                            </div>
+                          </div>
+
+                          <div>
+                            <input
+                              type="text"
+                              placeholder="ملاحظات أو تعليق للطالب على الإجابة (اختياري)..."
+                              value={feedbackMap[q.id] || ''}
+                              onChange={(e) =>
+                                setFeedbackMap((prev) => ({
+                                  ...prev,
+                                  [q.id]: e.target.value,
+                                }))
+                              }
+                              className="w-full rounded-lg border border-slate-200 p-2 text-xs outline-hidden focus:border-[#1d5ca8]"
+                            />
+                          </div>
+
+                          <div className="flex justify-end pt-1">
+                            <button
+                              type="button"
+                              disabled={savingGradeId === q.id}
+                              onClick={() => handleSaveQuestionGrade(q.id)}
+                              className="inline-flex items-center gap-1 rounded-xl bg-[#1d5ca8] px-3.5 py-1.5 text-xs font-bold text-white shadow-xs hover:bg-[#164e93] disabled:opacity-50"
+                            >
+                              {savingGradeId === q.id ? (
+                                <Loader2 className="size-3.5 animate-spin" />
+                              ) : (
+                                <CheckCircle2 className="size-3.5" />
+                              )}
+                              <span>اعتماد وحفظ درجة هذا السؤال</span>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        ) : null}
+      </Modal>
+
+      {/* Paper Zoom Preview Modal */}
+      <Modal
+        isOpen={Boolean(previewZoomImage)}
+        onClose={() => setPreviewZoomImage(null)}
+        title="معاينة ورقة إجابة الطالب بالحجم الكامل"
+        maxWidth="max-w-4xl"
+      >
+        {previewZoomImage && (
+          <div className="flex justify-center p-2">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={previewZoomImage}
+              alt="ورقة إجابة الطالب"
+              className="max-h-[75vh] w-auto rounded-xl object-contain shadow-md"
+            />
+          </div>
+        )}
       </Modal>
     </div>
   )
