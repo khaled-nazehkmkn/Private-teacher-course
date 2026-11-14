@@ -2,7 +2,7 @@ import { normalizeArabicDigits } from './access-code'
 import { cleanGeminiArtifacts, cleanGeminiOption } from '@/components/ui/math-renderer'
 
 export interface ParsedQuestion {
-  type: 'mcq'
+  type: 'mcq' | 'essay'
   body: string
   options: string[]
   correct: number[]
@@ -12,6 +12,7 @@ export interface ParsedQuestion {
   lesson?: string
   difficulty?: string
   image_path?: string
+  model_answer?: string
 }
 
 function cleanJsonText(raw: string): string {
@@ -56,9 +57,51 @@ export function parseJsonQuestions(jsonContent: string): {
         return
       }
 
-      const rawOptions = q.options || q.choices || q.answers
+      // Detect question type
+      let qType: 'mcq' | 'essay' | 'true_false' = 'mcq'
+      const rawType = String(q.type || '').toLowerCase().trim()
+      if (rawType === 'essay' || rawType === 'subjective' || rawType === 'problem' || rawType === 'written' || rawType === 'مقالي') {
+        qType = 'essay'
+      } else if (rawType === 'true_false' || rawType === 'tf' || rawType === 'boolean' || rawType === 'صح_وخطأ' || rawType === 'صواب_وخطأ') {
+        qType = 'true_false'
+      } else if (!q.options && !q.choices && (q.model_answer || q.solution || q.answer_text)) {
+        // Automatically inferred as essay if no options and has model answer
+        qType = 'essay'
+      }
+
+      const lesson = cleanGeminiArtifacts(
+        String(q.lesson || q.lesson_name || q.lesson_number || q.lesson_num || '')
+      ).trim()
+
+      // Handle Essay Questions
+      if (qType === 'essay') {
+        const modelAns = q.model_answer || q.solution || q.answer || q.answer_text || ''
+        parsedQuestions.push({
+          type: 'essay',
+          body: cleanGeminiArtifacts(body.trim()),
+          options: [],
+          correct: [],
+          marks: Number(q.marks) || 2,
+          topic: cleanGeminiArtifacts(q.topic || '').trim(),
+          grade: cleanGeminiArtifacts(q.grade || '').trim(),
+          lesson: lesson || undefined,
+          difficulty: q.difficulty || 'medium',
+          image_path: q.image || q.image_path || undefined,
+          model_answer: modelAns ? cleanGeminiArtifacts(String(modelAns).trim()) : undefined,
+        })
+        return
+      }
+
+      // Handle True / False or Multiple Choice Questions
+      let rawOptions = q.options || q.choices || q.answers
+
+      if (qType === 'true_false' && (!Array.isArray(rawOptions) || rawOptions.length < 2)) {
+        const isEnglish = /[a-zA-Z]{4,}/.test(body)
+        rawOptions = isEnglish ? ['True', 'False'] : ['صواب', 'خطأ']
+      }
+
       if (!Array.isArray(rawOptions) || rawOptions.length < 2) {
-        errors.push(`السؤال رقم ${qNum}: يجب توفير خيارين على الأقل.`)
+        errors.push(`السؤال رقم ${qNum}: يجب توفير خيارين على الأقل لأسئلة الاختيار من متعدد.`)
         return
       }
 
@@ -71,7 +114,9 @@ export function parseJsonQuestions(jsonContent: string): {
         const list = Array.isArray(rawCorrect) ? rawCorrect : [rawCorrect]
         
         list.forEach((val) => {
-          if (typeof val === 'number') {
+          if (typeof val === 'boolean') {
+            correctIndices.push(val ? 0 : 1)
+          } else if (typeof val === 'number') {
             correctIndices.push(val)
           } else {
             const strVal = String(val).trim()
@@ -80,13 +125,21 @@ export function parseJsonQuestions(jsonContent: string): {
             if (!isNaN(normalizedNum)) {
               correctIndices.push(normalizedNum)
             } else {
-              // Check letter mappings (A=0, B=1, C=2, D=3, or Arabic أ=0, ب=1, ج=2, د=3)
               const lower = strVal.toLowerCase()
-              if (lower === 'a' || strVal === 'أ' || strVal === 'ا') correctIndices.push(0)
-              else if (lower === 'b' || strVal === 'ب') correctIndices.push(1)
-              else if (lower === 'c' || strVal === 'ج') correctIndices.push(2)
-              else if (lower === 'd' || strVal === 'د') correctIndices.push(3)
-              else {
+              // Handle boolean keywords
+              if (lower === 'true' || lower === 't' || strVal === 'صواب' || strVal === 'صح' || strVal === 'ص') {
+                correctIndices.push(0)
+              } else if (lower === 'false' || lower === 'f' || strVal === 'خطأ' || strVal === 'غلط' || strVal === 'خ') {
+                correctIndices.push(1)
+              } else if (lower === 'a' || strVal === 'أ' || strVal === 'ا') {
+                correctIndices.push(0)
+              } else if (lower === 'b' || strVal === 'ب') {
+                correctIndices.push(1)
+              } else if (lower === 'c' || strVal === 'ج') {
+                correctIndices.push(2)
+              } else if (lower === 'd' || strVal === 'د') {
+                correctIndices.push(3)
+              } else {
                 // Check if string matches an option text exactly
                 const matchedIdx = options.findIndex((opt) => opt === strVal)
                 if (matchedIdx !== -1) {
@@ -121,10 +174,6 @@ export function parseJsonQuestions(jsonContent: string): {
         errors.push(`السؤال رقم ${qNum}: رقم الإجابة الصحيحة خارج حدود الخيارات.`)
         return
       }
-
-      const lesson = cleanGeminiArtifacts(
-        String(q.lesson || q.lesson_name || q.lesson_number || q.lesson_num || '')
-      ).trim()
 
       parsedQuestions.push({
         type: 'mcq',
@@ -196,6 +245,39 @@ export async function parseExcelQuestions(fileBuffer: ArrayBuffer): Promise<{
       if (opt3) options.push(cleanGeminiOption(String(opt3).trim()))
       if (opt4) options.push(cleanGeminiOption(String(opt4).trim()))
 
+      const marks = Number(row['الدرجة'] || row['marks'] || 1)
+      const topic = cleanGeminiArtifacts(String(row['الموضوع'] || row['topic'] || '')).trim()
+      const grade = cleanGeminiArtifacts(String(row['الصف'] || row['grade'] || '')).trim()
+      const lesson = cleanGeminiArtifacts(
+        String(
+          row['الدرس'] ||
+          row['رقم الدرس'] ||
+          row['اسم الدرس'] ||
+          row['lesson'] ||
+          row['lesson_number'] ||
+          ''
+        )
+      ).trim()
+      const difficulty = String(row['الصعوبة'] || row['difficulty'] || 'medium').trim()
+      const typeVal = String(row['نوع السؤال'] || row['النوع'] || row['type'] || '').toLowerCase().trim()
+      const modelAnswer = row['الإجابة النموذجية'] || row['model_answer'] || row['إجابة نموذجية'] || row['حل']
+
+      if (typeVal === 'essay' || typeVal === 'مقالي' || (options.length === 0 && modelAnswer)) {
+        parsedQuestions.push({
+          type: 'essay',
+          body: cleanGeminiArtifacts(String(body).trim()),
+          options: [],
+          correct: [],
+          marks: isNaN(marks) ? 2 : marks,
+          topic,
+          grade,
+          lesson: lesson || undefined,
+          difficulty,
+          model_answer: modelAnswer ? cleanGeminiArtifacts(String(modelAnswer).trim()) : undefined,
+        })
+        return
+      }
+
       if (options.length < 2) {
         errors.push(`السطر ${qNum}: يتطلب خيارين على الأقل.`)
         return
@@ -217,21 +299,6 @@ export async function parseExcelQuestions(fileBuffer: ArrayBuffer): Promise<{
           correctIdx = val
         }
       }
-
-      const marks = Number(row['الدرجة'] || row['marks'] || 1)
-      const topic = cleanGeminiArtifacts(String(row['الموضوع'] || row['topic'] || '')).trim()
-      const grade = cleanGeminiArtifacts(String(row['الصف'] || row['grade'] || '')).trim()
-      const lesson = cleanGeminiArtifacts(
-        String(
-          row['الدرس'] ||
-          row['رقم الدرس'] ||
-          row['اسم الدرس'] ||
-          row['lesson'] ||
-          row['lesson_number'] ||
-          ''
-        )
-      ).trim()
-      const difficulty = String(row['الصعوبة'] || row['difficulty'] || 'medium').trim()
 
       parsedQuestions.push({
         type: 'mcq',

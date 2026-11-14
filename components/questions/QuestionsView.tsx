@@ -36,39 +36,73 @@ import {
 import type { TeacherStatus } from '@/lib/teacher-status'
 import type { GroupItem } from '../groups/GroupsView'
 
-export const AI_PROMPT_TEMPLATE = `أنت معلم خبير ومصمم اختبارات محترف.
-يرجى قراءة الدرس/المستند المرفق وتوليد مجموعة من أسئلة الاختيار من متعدد (MCQ) بصيغة JSON حصراً، وفق الهيكل البرمجي التالي بدقة تامة ودون كتابة أي نصوص تمهيدية أو شروحات:
+export const AI_PROMPT_TEMPLATE = `أنت معلم ومصمم اختبارات خبير، ومتخصص في استخراج الأسئلة من الصور والمستندات (OCR) وتنسيقها برمجياً.
+المطلوب: اقرأ الصورة المرفقة (أو النص/الملف المرفق) بدقة تامة، واستخرج جميع الأسئلة الواردة فيها بجميع أشكالها (اختيار من متعدد MCQ، صواب وخطأ True/False، أسئلة مقالية ومسائل بالخطوات Essay/Problem-solving) وحوّلها حصراً إلى كود JSON صالح وفق الهيكل التالي دون كتابة أي نصوص تمهيدية أو شروحات:
 
 {
   "questions": [
     {
-      "body": "اكتب نص السؤال هنا بدقة ووضوح؟",
+      "type": "mcq",
+      "body": "إذا كانت $f(x) = x^2 - 4x + 3$، فإن القيمة الصغرى للدالة هي:",
       "options": [
-        "الخيار الأول",
-        "الخيار الثاني",
-        "الخيار الثالث",
-        "الخيار الرابع"
+        "$-1$",
+        "$1$",
+        "$-3$",
+        "$3$"
       ],
       "correct": [0],
       "marks": 1,
       "grade": "الصف الثاني الثانوي",
-      "lesson": "الدرس الأول: نظرية ذات الحدين",
+      "lesson": "الدرس الأول: الدوال الحقيقية",
       "topic": "الجبر",
       "difficulty": "medium"
+    },
+    {
+      "type": "true_false",
+      "body": "مجموع قياسات الزوايا الداخلة لأي مثلث يساوي $180^\\circ$.",
+      "options": [
+        "صواب",
+        "خطأ"
+      ],
+      "correct": [0],
+      "marks": 1,
+      "grade": "الصف الأول الثانوي",
+      "lesson": "الدرس الثاني: المثلثات",
+      "topic": "الهندسة",
+      "difficulty": "easy"
+    },
+    {
+      "type": "essay",
+      "body": "أوجد مجموعة حل المعادلة الآتية في $\\mathbb{R}$: $\\sqrt{x + 5} = x - 1$",
+      "options": [],
+      "correct": [],
+      "model_answer": "خطوات الحل النموذجية:\n1) بتربيع الطرفين: $x + 5 = (x - 1)^2$\n2) $x + 5 = x^2 - 2x + 1$\n3) $x^2 - 3x - 4 = 0$\n4) $(x - 4)(x + 1) = 0$\n5) إذن $x = 4$ أو $x = -1$\nبالتحقق: $x = 4$ يحقق المعادلة (طرف أيمن موجب)، بينما $x = -1$ مرفوض.\nإذن مجموعة الحل هي: $\\{4\\}$",
+      "marks": 3,
+      "grade": "الصف الثاني الثانوي",
+      "lesson": "الدرس الثالث: حل المعادلات الجذرية",
+      "topic": "الجبر",
+      "difficulty": "hard"
     }
   ]
 }
 
-قواعد هامة:
-1. "lesson": اسم أو رقم الدرس بدقة (مثال: "الدرس الأول: نظرية ذات الحدين" أو "1 - مبدأ العد") لربط السؤال بدرس محدد لتسهيل التوزيع العشوائي في الاختبارات.
-2. "topic": اسم الوحدة أو الفرع العام (مثال: "الجبر").
-3. للمعادلات والرموز الرياضية: اكتب الرموز والمعادلات بصيغة LaTeX محاطة بعلامة $ مثل $b^2$ أو $(2 + a - b^2)^4$ أو $(3^{2n} - 1)$ لتظهر للطلاب بشكل رياضي منسق وأنيق.
-4. ممنوع تماماً إدراج أي وسوم أو علامات اقتباس بحثية مثل [span_x] أو (start_span) أو (end_span).
-5. "options": مصفوفة تحتوي على 4 خيارات منطقية ومتنوعة.
-6. "correct": مصفوفة برقم مؤشر الإجابة الصحيحة (0 للخيار الأول، 1 للثاني، 2 للثالث، 3 للرابع).
-7. "marks": درجة السؤال (رقم صحيح مثلاً 1 أو 2).
-8. "difficulty": مستوى الصعوبة ("easy" أو "medium" أو "hard").
-9. لا داعي لكتابة اسم المجموعة في الـ JSON، حيث يقوم التطبيق بتعيين المجموعة المحددة تلقائياً لكافة الأسئلة المستوردة.`
+قواعد وإرشادات إلزامية:
+1. قراءة الصور: اقرأ كافة الأسئلة الموجودة في الصورة بالترتيب. إذا كانت الصورة بالإنجليزية (Math / Science لغات) احتفظ باللغة الإنجليزية كما هي، وإذا كانت بالعربية احتفظ بالعربية.
+2. أنواع الأسئلة المدعومة في "type":
+   - "mcq": لأسئلة الاختيار من متعدد. "options" مصفوفة بجميع الخيارات، و "correct" مصفوفة برقم مؤشر الإجابة الصحيحة يبدأ من 0 (مثلاً [0] للخيار الأول، [1] للثاني).
+   - "true_false": لأسئلة الصواب والخطأ. "options" تكون ["صواب", "خطأ"] (أو ["True", "False"] للإنجليزية)، و "correct" يكون [0] للصواب أو [1] للخطأ.
+   - "essay": للأسئلة المقالية، مسائل الإثبات، أوجد الناتج، أو الأسئلة التي تتطلب خطوات حل. "options" مصفوفة فارغة []، و "correct" مصفوفة فارغة []، ويجب كتابة خطوات الحل والناتج النهائي بالتفصيل في حقل "model_answer".
+3. المعادلات والرموز الرياضية:
+   - اكتب أي رمز أو معادلة أو رقم رياضي بصيغة LaTeX محاطاً بعلامة $ مثل $x^2 + 5$ أو $\\frac{a}{b}$ أو $\\sqrt{x}$ أو $\\begin{pmatrix} 1 & 2 \\\\ 3 & 4 \\end{pmatrix}$.
+4. منع وسوم البحث تماماً:
+   - ممنوع منعاً باتاً تضمين أي علامات توثيق بحثية مثل [span_x] أو (start_span) أو (end_span).
+5. بيانات الدرس والصف:
+   - "lesson": اسم أو رقم الدرس المكتوب في رأس الورقة أو المستنتج من محتوى السؤال (مثال: "الدرس الأول: نظرية ذات الحدين").
+   - "topic": اسم الفرع أو الوحدة (مثال: "الجبر"، "التفاضل والتكامل"، "الهندسة"، "الفيزياء").
+   - "grade": الصف الدراسي إذا كان مذكوراً في رأس الورقة (مثال: "الصف الأول الثانوي"، "الصف الثاني الثانوي"، "الصف الثالث الثانوي").
+   - "difficulty": مستوى الصعوبة التقديري ("easy" أو "medium" أو "hard").
+   - "marks": درجة السؤال (رقم صحيح مثلاً 1 للاختياري، و 2 أو 3 أو 4 للمقالي).
+6. صيغة الإخراج: أخرج فقط كود JSON صالح يبدأ بـ { وينتهي بـ } بدون أي مقدمات أو نصوص خارج الكود.`
 
 export interface QuestionBankItem {
   id: string
@@ -422,15 +456,16 @@ export function QuestionsView({
           const finalTopic = formatQuestionTopic(groupPrefix, p.topic, qLesson)
           return {
             body: cleanGeminiArtifacts(p.body),
-            type: 'mcq' as const,
-            options: p.options.map(cleanGeminiOption),
-            correct: p.correct,
+            type: p.type === 'essay' ? ('essay' as const) : ('mcq' as const),
+            options: p.type === 'essay' ? [] : p.options.map(cleanGeminiOption),
+            correct: p.type === 'essay' ? [] : p.correct,
             marks: p.marks,
             grade: finalGrade || p.grade || 'الصف الأول الثانوي',
             lesson: qLesson || undefined,
             topic: finalTopic || undefined,
             difficulty: p.difficulty,
             image_path: p.image_path,
+            model_answer: p.model_answer ? cleanGeminiArtifacts(p.model_answer) : undefined,
           }
         })
       )
@@ -1061,7 +1096,7 @@ export function QuestionsView({
                   </button>
                 </div>
                 <p className="mt-1.5 text-[11px] text-blue-800 leading-relaxed">
-                  اضغط على الزر لنسخ البرومبت الجاهز، ثم الصقه في ChatGPT أو Gemini مع درسك أو ملزمتك، وسيقوم الذكاء الاصطناعي بإنشاء الأسئلة بتنسيق JSON المطلوب فوراً لتلصقه هنا.
+                  انسخ البرومبت والصقه في Gemini أو ChatGPT مع <strong>صورة لورقة الامتحان/المذكرة أو نص الدرس</strong>، وسيقوم بقراءة كافة الأسئلة (اختيار من متعدد، صواب وخطأ، أسئلة مقالية ومسائل بالخطوات) وتوليدها بصيغة JSON فوراً لتلصقها هنا.
                 </p>
               </div>
 
@@ -1167,11 +1202,22 @@ export function QuestionsView({
               <div className="max-h-48 overflow-y-auto rounded-xl border border-slate-200 p-2 text-xs space-y-2">
                 {parsedPreview.map((p, i) => {
                   const pLesson = p.lesson || extractLessonFromTopic(p.topic)
+                  const isEssay = p.type === 'essay'
+                  const isTrueFalse = !isEssay && p.options.length === 2 && (p.options.includes('صواب') || p.options.includes('True') || p.options.includes('صح'))
                   return (
                     <div key={i} className="border-b pb-2 last:border-0">
                       <div className="flex items-start justify-between gap-2">
                         <div className="font-bold text-slate-800 flex-1 min-w-0">
                           <span className="ml-1 text-slate-500">{i + 1}.</span>
+                          <span className={`ml-1.5 inline-block rounded-md px-1.5 py-0.5 text-[10px] font-bold ${
+                            isEssay
+                              ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                              : isTrueFalse
+                              ? 'bg-purple-100 text-purple-800 border border-purple-200'
+                              : 'bg-blue-100 text-[#1d5ca8] border border-blue-200'
+                          }`}>
+                            {isEssay ? 'مقالي' : isTrueFalse ? 'صواب وخطأ' : 'اختيار من متعدد'}
+                          </span>
                           <MathRenderer text={p.body} as="span" />
                         </div>
                         {pLesson && (
@@ -1180,10 +1226,18 @@ export function QuestionsView({
                           </span>
                         )}
                       </div>
-                      <p className="text-[11px] text-slate-500 mt-1">
-                        الخيارات ({p.options.length}) · الدرجة: {p.marks}
-                        {p.grade && <span> · {p.grade}</span>}
-                      </p>
+                      <div className="text-[11px] text-slate-500 mt-1">
+                        {isEssay ? (
+                          <p className="text-amber-800 line-clamp-1">
+                            {p.model_answer ? `الإجابة النموذجية: ${p.model_answer}` : 'بدون إجابة نموذجية'}
+                          </p>
+                        ) : (
+                          <p>
+                            الخيارات ({p.options.length}) · الدرجة: {p.marks}
+                            {p.grade && <span> · {p.grade}</span>}
+                          </p>
+                        )}
+                      </div>
                     </div>
                   )
                 })}
