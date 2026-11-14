@@ -2,6 +2,7 @@ import { Analytics } from '@vercel/analytics/next'
 import { Cairo } from 'next/font/google'
 import type { Metadata, Viewport } from 'next'
 import './globals.css'
+import 'katex/dist/katex.min.css'
 
 const cairo = Cairo({ subsets: ['arabic'], variable: '--font-cairo' })
 

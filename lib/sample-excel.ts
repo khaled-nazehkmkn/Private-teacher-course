@@ -15,6 +15,7 @@ export async function downloadSampleQuestionExcel(): Promise<void> {
       'الإجابة الصحيحة': '3',
       'الدرجة': 1,
       'الموضوع': 'العمليات الحسابية',
+      'الدرس': 'الدرس الأول: ضرب الأعداد',
       'الصف': 'الصف الأول الإعدادي',
       'الصعوبة': 'easy',
     },
@@ -27,6 +28,7 @@ export async function downloadSampleQuestionExcel(): Promise<void> {
       'الإجابة الصحيحة': '2',
       'الدرجة': 2,
       'الموضوع': 'المعادلات الجبرية',
+      'الدرس': 'الدرس الثاني: حل المعادلات',
       'الصف': 'الصف الأول الإعدادي',
       'الصعوبة': 'medium',
     },
@@ -39,6 +41,7 @@ export async function downloadSampleQuestionExcel(): Promise<void> {
       'الإجابة الصحيحة': '3',
       'الدرجة': 1,
       'الموضوع': 'قوانين نيوتن',
+      'الدرس': 'الدرس الأول: القوى والحركة',
       'الصف': 'الصف الأول الثانوي',
       'الصعوبة': 'medium',
     },
@@ -51,6 +54,7 @@ export async function downloadSampleQuestionExcel(): Promise<void> {
       'الإجابة الصحيحة': '3',
       'الدرجة': 1,
       'الموضوع': 'الطاقة والبيئة',
+      'الدرس': 'الدرس الثاني: مصادر الطاقة',
       'الصف': 'الصف الأول الثانوي',
       'الصعوبة': 'easy',
     },
@@ -68,6 +72,7 @@ export async function downloadSampleQuestionExcel(): Promise<void> {
     { wch: 16 }, // الإجابة الصحيحة
     { wch: 10 }, // الدرجة
     { wch: 22 }, // الموضوع
+    { wch: 24 }, // الدرس
     { wch: 22 }, // الصف
     { wch: 14 }, // الصعوبة
   ]

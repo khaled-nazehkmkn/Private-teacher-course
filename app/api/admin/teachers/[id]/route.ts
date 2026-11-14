@@ -55,7 +55,7 @@ export async function PATCH(
 
     const { data: updatedTeacher, error: updateError } = await adminClient
       .from('teachers')
-      .update(updateData)
+      .update(updateData as any)
       .eq('id', teacherId)
       .select()
       .single()

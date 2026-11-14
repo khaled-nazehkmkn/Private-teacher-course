@@ -15,6 +15,7 @@ import {
   Plus,
   FileText,
 } from 'lucide-react'
+import { MathRenderer } from '@/components/ui/math-renderer'
 
 interface QuestionItem {
   id: string
@@ -526,9 +527,11 @@ export default function StudentExamPage({
               </div>
 
               {/* Question Body */}
-              <p className="mt-2.5 text-sm sm:text-base font-bold text-slate-800 leading-relaxed">
-                {q.body}
-              </p>
+              <MathRenderer
+                text={q.body}
+                as="p"
+                className="mt-2.5 text-sm sm:text-base font-bold text-slate-800 leading-relaxed"
+              />
 
               {/* Optional Image (Compact, readable, with tap to zoom) */}
               {q.image_path && (
@@ -595,7 +598,7 @@ export default function StudentExamPage({
                           >
                             {String.fromCharCode(65 + optIdx)}
                           </span>
-                          <span className="break-words">{option}</span>
+                          <MathRenderer text={option} as="span" className="break-words" />
                         </div>
                         {isSelected && <CheckCircle2 className="size-4 shrink-0 text-[#1d5ca8]" />}
                       </button>

@@ -1,4 +1,5 @@
 import { normalizeArabicDigits } from './access-code'
+import { cleanGeminiArtifacts, cleanGeminiOption } from '@/components/ui/math-renderer'
 
 export interface ParsedQuestion {
   type: 'mcq'
@@ -8,6 +9,7 @@ export interface ParsedQuestion {
   marks: number
   topic?: string
   grade?: string
+  lesson?: string
   difficulty?: string
   image_path?: string
 }
@@ -60,7 +62,7 @@ export function parseJsonQuestions(jsonContent: string): {
         return
       }
 
-      const options = rawOptions.map((opt: unknown) => String(opt).trim())
+      const options = rawOptions.map((opt: unknown) => cleanGeminiOption(String(opt).trim()))
 
       let correctIndices: number[] = []
       const rawCorrect = q.correct ?? q.correct_answer ?? q.answer ?? q.answer_index
@@ -120,14 +122,19 @@ export function parseJsonQuestions(jsonContent: string): {
         return
       }
 
+      const lesson = cleanGeminiArtifacts(
+        String(q.lesson || q.lesson_name || q.lesson_number || q.lesson_num || '')
+      ).trim()
+
       parsedQuestions.push({
         type: 'mcq',
-        body: body.trim(),
+        body: cleanGeminiArtifacts(body.trim()),
         options,
         correct: correctIndices,
         marks: Number(q.marks) || 1,
-        topic: q.topic || '',
-        grade: q.grade || '',
+        topic: cleanGeminiArtifacts(q.topic || '').trim(),
+        grade: cleanGeminiArtifacts(q.grade || '').trim(),
+        lesson: lesson || undefined,
         difficulty: q.difficulty || 'medium',
         image_path: q.image || q.image_path || undefined,
       })
@@ -184,10 +191,10 @@ export async function parseExcelQuestions(fileBuffer: ArrayBuffer): Promise<{
       const opt3 = row['الخيار الثالث'] || row['خيار 3'] || row['option 3'] || row['opt3']
       const opt4 = row['الخيار الرابع'] || row['خيار 4'] || row['option 4'] || row['opt4']
 
-      if (opt1) options.push(String(opt1).trim())
-      if (opt2) options.push(String(opt2).trim())
-      if (opt3) options.push(String(opt3).trim())
-      if (opt4) options.push(String(opt4).trim())
+      if (opt1) options.push(cleanGeminiOption(String(opt1).trim()))
+      if (opt2) options.push(cleanGeminiOption(String(opt2).trim()))
+      if (opt3) options.push(cleanGeminiOption(String(opt3).trim()))
+      if (opt4) options.push(cleanGeminiOption(String(opt4).trim()))
 
       if (options.length < 2) {
         errors.push(`السطر ${qNum}: يتطلب خيارين على الأقل.`)
@@ -212,18 +219,29 @@ export async function parseExcelQuestions(fileBuffer: ArrayBuffer): Promise<{
       }
 
       const marks = Number(row['الدرجة'] || row['marks'] || 1)
-      const topic = String(row['الموضوع'] || row['topic'] || '').trim()
-      const grade = String(row['الصف'] || row['grade'] || '').trim()
+      const topic = cleanGeminiArtifacts(String(row['الموضوع'] || row['topic'] || '')).trim()
+      const grade = cleanGeminiArtifacts(String(row['الصف'] || row['grade'] || '')).trim()
+      const lesson = cleanGeminiArtifacts(
+        String(
+          row['الدرس'] ||
+          row['رقم الدرس'] ||
+          row['اسم الدرس'] ||
+          row['lesson'] ||
+          row['lesson_number'] ||
+          ''
+        )
+      ).trim()
       const difficulty = String(row['الصعوبة'] || row['difficulty'] || 'medium').trim()
 
       parsedQuestions.push({
         type: 'mcq',
-        body: String(body).trim(),
+        body: cleanGeminiArtifacts(String(body).trim()),
         options,
         correct: [correctIdx],
         marks: isNaN(marks) ? 1 : marks,
         topic,
         grade,
+        lesson: lesson || undefined,
         difficulty,
       })
     })

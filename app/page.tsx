@@ -18,6 +18,11 @@ import { AttendanceView, type OccurrenceItem, type AttendanceStatus } from '@/co
 import { AbsenceView, type AbsenceRecord } from '@/components/absence/AbsenceView'
 import { MakeupView, type MakeupRequestItem } from '@/components/makeup/MakeupView'
 import { QuestionsView, type QuestionBankItem } from '@/components/questions/QuestionsView'
+import {
+  cleanGeminiArtifacts,
+  cleanGeminiOption,
+  extractLessonFromTopic,
+} from '@/components/ui/math-renderer'
 import { ExamsView, type ExamItem, type ExamSubmissionDetail } from '@/components/exams/ExamsView'
 import { RemindersView, type ReminderItem } from '@/components/reminders/RemindersView'
 import { ReportsView } from '@/components/reports/ReportsView'
@@ -282,19 +287,22 @@ export default function TeacherAppPage() {
           setQuestions(
             qData.map((q: any) => ({
               id: q.id,
-              body: q.body,
+              body: cleanGeminiArtifacts(q.body),
               type: q.type || 'mcq',
               image_path: q.image_path,
-              options: Array.isArray(q.options) ? q.options : [],
+              options: Array.isArray(q.options)
+                ? q.options.map((opt: any) => cleanGeminiOption(String(opt)))
+                : [],
               correct: Array.isArray(q.correct) ? q.correct : [0],
               marks: q.marks,
               grade: q.grade,
               topic: q.topic,
+              lesson: q.lesson || extractLessonFromTopic(q.topic) || null,
               difficulty: q.difficulty,
               model_answer:
-                q.model_answer ||
+                cleanGeminiArtifacts(q.model_answer || '') ||
                 (q.type === 'essay' && Array.isArray(q.correct) && q.correct.length > 0
-                  ? q.correct[0]
+                  ? cleanGeminiArtifacts(String(q.correct[0]))
                   : null) ||
                 null,
             }))
@@ -930,18 +938,34 @@ export default function TeacherAppPage() {
           ? (qData.model_answer ? [qData.model_answer] : [])
           : (qData.correct || [0])
 
-      const { error } = await supabase.from('questions').insert({
+      const cleanBody = cleanGeminiArtifacts(qData.body)
+      const cleanOpts = (qData.options || []).map((o: string) => cleanGeminiOption(o))
+      const cleanLesson = qData.lesson ? cleanGeminiArtifacts(qData.lesson) : null
+
+      const baseRecord = {
         teacher_id: user.id,
-        body: qData.body,
+        body: cleanBody,
         type: qData.type || 'mcq',
-        options: (qData.options || []) as any,
+        options: cleanOpts as any,
         correct: correctVal as any,
         marks: qData.marks,
         grade: qData.grade,
         topic: qData.topic,
         difficulty: qData.difficulty,
         image_path: qData.image_path,
+      }
+
+      // Try inserting with lesson column first; fallback if migration 0003 is not yet run
+      let { error } = await supabase.from('questions').insert({
+        ...baseRecord,
+        lesson: cleanLesson,
       })
+
+      if (error && (error.code === 'PGRST204' || error.message?.includes('lesson'))) {
+        console.warn('[AddQuestion] Lesson column not found in schema cache, inserting without it:', error.message)
+        const fallback = await supabase.from('questions').insert(baseRecord)
+        error = fallback.error
+      }
 
       if (error) {
         console.error('[AddQuestion] Supabase insert error:', error)
@@ -957,6 +981,8 @@ export default function TeacherAppPage() {
       {
         id,
         ...qData,
+        body: cleanGeminiArtifacts(qData.body),
+        options: (qData.options || []).map((o: string) => cleanGeminiOption(o)),
       },
       ...prev,
     ])
@@ -977,19 +1003,27 @@ export default function TeacherAppPage() {
 
         return {
           teacher_id: user.id,
-          body: q.body,
+          body: cleanGeminiArtifacts(q.body),
           type: q.type || 'mcq',
-          options: (q.options || []) as any,
+          options: (q.options || []).map((o: string) => cleanGeminiOption(o)) as any,
           correct: correctVal as any,
           marks: q.marks,
           grade: q.grade,
           topic: q.topic,
+          lesson: q.lesson ? cleanGeminiArtifacts(q.lesson) : null,
           difficulty: q.difficulty,
           image_path: q.image_path,
         }
       })
 
-      const { error } = await supabase.from('questions').insert(records)
+      let { error } = await supabase.from('questions').insert(records)
+      if (error && (error.code === 'PGRST204' || error.message?.includes('lesson'))) {
+        console.warn('[BatchAddQuestions] Lesson column not found in schema cache, retrying without lesson column')
+        const fallbackRecords = records.map(({ lesson, ...rest }) => rest)
+        const fallback = await supabase.from('questions').insert(fallbackRecords)
+        error = fallback.error
+      }
+
       if (error) {
         console.error('[BatchAddQuestions] Supabase error:', error)
         throw new Error(error.message || 'فشل استيراد الأسئلة في قاعدة البيانات')
@@ -1002,6 +1036,8 @@ export default function TeacherAppPage() {
     const newItems: QuestionBankItem[] = qList.map((q, idx) => ({
       id: `q-import-${Date.now()}-${idx}`,
       ...q,
+      body: cleanGeminiArtifacts(q.body),
+      options: (q.options || []).map((o: string) => cleanGeminiOption(o)),
     }))
     setQuestions((prev) => [...newItems, ...prev])
   }
@@ -1010,6 +1046,75 @@ export default function TeacherAppPage() {
     const supabase = createClient()
     await supabase.from('questions').delete().eq('id', id)
     setQuestions((prev) => prev.filter((q) => q.id !== id))
+  }
+
+  const handleUpdateQuestion = async (
+    id: string,
+    qData: Partial<QuestionBankItem>
+  ) => {
+    const supabase = createClient()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (user) {
+      const correctVal =
+        qData.type === 'essay'
+          ? (qData.model_answer ? [qData.model_answer] : [])
+          : (qData.correct !== undefined ? qData.correct : undefined)
+
+      const cleanBody = qData.body !== undefined ? cleanGeminiArtifacts(qData.body) : undefined
+      const cleanOpts = qData.options !== undefined ? qData.options.map((o: string) => cleanGeminiOption(o)) : undefined
+      const cleanLesson = qData.lesson !== undefined ? (qData.lesson ? cleanGeminiArtifacts(qData.lesson) : null) : undefined
+
+      const updateRecord: Record<string, any> = {}
+      if (cleanBody !== undefined) updateRecord.body = cleanBody
+      if (qData.type !== undefined) updateRecord.type = qData.type
+      if (cleanOpts !== undefined) updateRecord.options = cleanOpts
+      if (correctVal !== undefined) updateRecord.correct = correctVal
+      if (qData.marks !== undefined) updateRecord.marks = qData.marks
+      if (qData.grade !== undefined) updateRecord.grade = qData.grade
+      if (qData.topic !== undefined) updateRecord.topic = qData.topic
+      if (qData.difficulty !== undefined) updateRecord.difficulty = qData.difficulty
+      if (qData.image_path !== undefined) updateRecord.image_path = qData.image_path
+      if (qData.model_answer !== undefined) updateRecord.model_answer = qData.model_answer
+
+      if (cleanLesson !== undefined) {
+        updateRecord.lesson = cleanLesson
+      }
+
+      let { error } = await supabase.from('questions').update(updateRecord as any).eq('id', id)
+
+      if (error && (error.code === 'PGRST204' || error.message?.includes('lesson'))) {
+        console.warn('[UpdateQuestion] Lesson column not found in schema cache, updating without it:', error.message)
+        delete updateRecord.lesson
+        const fallback = await supabase.from('questions').update(updateRecord as any).eq('id', id)
+        error = fallback.error
+      }
+
+      if (error) {
+        console.error('[UpdateQuestion] Supabase update error:', error)
+        throw new Error(error.message || 'فشل تحديث السؤال في قاعدة البيانات')
+      }
+
+      await loadData()
+      return
+    }
+
+    setQuestions((prev) =>
+      prev.map((q) => {
+        if (q.id === id) {
+          return {
+            ...q,
+            ...qData,
+            body: qData.body !== undefined ? cleanGeminiArtifacts(qData.body) : q.body,
+            options: qData.options !== undefined ? qData.options.map((o: string) => cleanGeminiOption(o)) : q.options,
+            lesson: qData.lesson !== undefined ? (qData.lesson ? cleanGeminiArtifacts(qData.lesson) : null) : q.lesson,
+          }
+        }
+        return q
+      })
+    )
   }
 
   const handleUploadImage = async (fileBlob: Blob, fileName: string): Promise<string> => {
@@ -1420,6 +1525,7 @@ export default function TeacherAppPage() {
               onAddQuestion={handleAddQuestion}
               onBatchAddQuestions={handleBatchAddQuestions}
               onDeleteQuestion={handleDeleteQuestion}
+              onUpdateQuestion={handleUpdateQuestion}
               onUploadImage={handleUploadImage}
               teacherStatus={teacherStatus}
             />

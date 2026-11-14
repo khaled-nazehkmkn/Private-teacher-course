@@ -19,16 +19,25 @@ import {
   X,
   Sparkles,
   Users,
+  BookMarked,
+  Edit3,
 } from 'lucide-react'
 import { Modal } from '@/components/ui/modal'
 import { compressImage } from '@/lib/image-compress'
 import { parseJsonQuestions, parseExcelQuestions, type ParsedQuestion } from '@/lib/question-parser'
 import { downloadSampleQuestionExcel } from '@/lib/sample-excel'
+import {
+  MathRenderer,
+  cleanGeminiArtifacts,
+  cleanGeminiOption,
+  extractLessonFromTopic,
+  formatQuestionTopic,
+} from '@/components/ui/math-renderer'
 import type { TeacherStatus } from '@/lib/teacher-status'
 import type { GroupItem } from '../groups/GroupsView'
 
 export const AI_PROMPT_TEMPLATE = `أنت معلم خبير ومصمم اختبارات محترف.
-يرجى قراءة الدرس/المستند المرفق وتوليد مجموعة من أسئلة الاختيار من متعدد (MCQ) باللغة العربية بصيغة JSON حصراً، وفق الهيكل البرمجي التالي بدقة تامة ودون كتابة أي نصوص تمهيدية أو شروحات:
+يرجى قراءة الدرس/المستند المرفق وتوليد مجموعة من أسئلة الاختيار من متعدد (MCQ) بصيغة JSON حصراً، وفق الهيكل البرمجي التالي بدقة تامة ودون كتابة أي نصوص تمهيدية أو شروحات:
 
 {
   "questions": [
@@ -42,19 +51,24 @@ export const AI_PROMPT_TEMPLATE = `أنت معلم خبير ومصمم اختب�
       ],
       "correct": [0],
       "marks": 1,
-      "grade": "الصف الأول الثانوي",
-      "topic": "اسم الدرس أو الوحدة",
+      "grade": "الصف الثاني الثانوي",
+      "lesson": "الدرس الأول: نظرية ذات الحدين",
+      "topic": "الجبر",
       "difficulty": "medium"
     }
   ]
 }
 
 قواعد هامة:
-1. "options": مصفوفة تحتوي على 4 خيارات منطقية ومتنوعة.
-2. "correct": مصفوفة برقم مؤشر الإجابة الصحيحة (0 للخيار الأول، 1 للثاني، 2 للثالث، 3 للرابع).
-3. "marks": درجة السؤال (رقم صحيح مثلاً 1 أو 2).
-4. "difficulty": مستوى الصعوبة ("easy" أو "medium" أو "hard").
-5. لا داعي لكتابة اسم المجموعة في الـ JSON، حيث يقوم التطبيق بتعيين المجموعة المحددة تلقائياً لكافة الأسئلة المستوردة.`
+1. "lesson": اسم أو رقم الدرس بدقة (مثال: "الدرس الأول: نظرية ذات الحدين" أو "1 - مبدأ العد") لربط السؤال بدرس محدد لتسهيل التوزيع العشوائي في الاختبارات.
+2. "topic": اسم الوحدة أو الفرع العام (مثال: "الجبر").
+3. للمعادلات والرموز الرياضية: اكتب الرموز والمعادلات بصيغة LaTeX محاطة بعلامة $ مثل $b^2$ أو $(2 + a - b^2)^4$ أو $(3^{2n} - 1)$ لتظهر للطلاب بشكل رياضي منسق وأنيق.
+4. ممنوع تماماً إدراج أي وسوم أو علامات اقتباس بحثية مثل [span_x] أو (start_span) أو (end_span).
+5. "options": مصفوفة تحتوي على 4 خيارات منطقية ومتنوعة.
+6. "correct": مصفوفة برقم مؤشر الإجابة الصحيحة (0 للخيار الأول، 1 للثاني، 2 للثالث، 3 للرابع).
+7. "marks": درجة السؤال (رقم صحيح مثلاً 1 أو 2).
+8. "difficulty": مستوى الصعوبة ("easy" أو "medium" أو "hard").
+9. لا داعي لكتابة اسم المجموعة في الـ JSON، حيث يقوم التطبيق بتعيين المجموعة المحددة تلقائياً لكافة الأسئلة المستوردة.`
 
 export interface QuestionBankItem {
   id: string
@@ -66,6 +80,7 @@ export interface QuestionBankItem {
   marks: number
   topic?: string | null
   grade?: string | null
+  lesson?: string | null
   difficulty?: string | null
   model_answer?: string | null
 }
@@ -76,6 +91,7 @@ interface Props {
   onAddQuestion: (q: Omit<QuestionBankItem, 'id'>) => Promise<void>
   onBatchAddQuestions: (qList: Omit<QuestionBankItem, 'id'>[]) => Promise<void>
   onDeleteQuestion: (id: string) => Promise<void>
+  onUpdateQuestion?: (id: string, q: Partial<QuestionBankItem>) => Promise<void>
   onUploadImage?: (file: Blob, fileName: string) => Promise<string>
   teacherStatus: TeacherStatus
 }
@@ -86,19 +102,22 @@ export function QuestionsView({
   onAddQuestion,
   onBatchAddQuestions,
   onDeleteQuestion,
+  onUpdateQuestion,
   onUploadImage,
   teacherStatus,
 }: Props) {
   const [searchTerm, setSearchTerm] = useState('')
   const [gradeFilter, setGradeFilter] = useState('all')
   const [groupFilter, setGroupFilter] = useState('all')
+  const [lessonFilter, setLessonFilter] = useState('all')
 
   // Group selection states
   const [importTargetGroup, setImportTargetGroup] = useState<string>(groups[0]?.id || '')
   const [manualTargetGroup, setManualTargetGroup] = useState<string>(groups[0]?.id || '')
 
-  // Manual Question Modal
+  // Manual / Edit Question Modal State
   const [manualModalOpen, setManualModalOpen] = useState(false)
+  const [editingQuestion, setEditingQuestion] = useState<QuestionBankItem | null>(null)
   const [questionType, setQuestionType] = useState<'mcq' | 'essay'>('mcq')
   const [body, setBody] = useState('')
   const [modelAnswer, setModelAnswer] = useState('')
@@ -107,10 +126,86 @@ export function QuestionsView({
   const [marks, setMarks] = useState(1)
   const [grade, setGrade] = useState('الصف الأول الثانوي')
   const [topic, setTopic] = useState('')
+  const [lesson, setLesson] = useState('')
   const [difficulty, setDifficulty] = useState<'easy' | 'medium' | 'hard'>('medium')
   const [imageFile, setImageFile] = useState<File | null>(null)
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null)
+  const [existingImagePath, setExistingImagePath] = useState<string | null>(null)
   const [loadingAdd, setLoadingAdd] = useState(false)
+
+  // Open modal for adding new question
+  const handleOpenAdd = () => {
+    setEditingQuestion(null)
+    setQuestionType('mcq')
+    setBody('')
+    setModelAnswer('')
+    setOptions(['', '', '', ''])
+    setCorrectIdx(0)
+    setMarks(1)
+    setGrade(groups[0]?.grade || 'الصف الأول الثانوي')
+    setManualTargetGroup(groups[0]?.id || '')
+    setLesson('')
+    setTopic('')
+    setDifficulty('medium')
+    setImageFile(null)
+    setImagePreviewUrl(null)
+    setExistingImagePath(null)
+    setManualModalOpen(true)
+  }
+
+  // Open modal for editing existing question
+  const handleOpenEdit = (q: QuestionBankItem) => {
+    setEditingQuestion(q)
+    setQuestionType(q.type || 'mcq')
+    setBody(q.body)
+    setModelAnswer(
+      q.model_answer ||
+        (Array.isArray(q.correct) && typeof q.correct[0] === 'string' ? q.correct[0] : '')
+    )
+    setOptions(q.options && q.options.length >= 2 ? [...q.options] : ['', '', '', ''])
+    setCorrectIdx(
+      q.correct && q.correct.length > 0 && typeof q.correct[0] === 'number' ? q.correct[0] : 0
+    )
+    setMarks(q.marks || 1)
+    setGrade(q.grade || 'الصف الأول الثانوي')
+
+    const matchedGroup = groups.find(
+      (g) => (q.topic && q.topic.includes(g.name)) || g.grade === q.grade
+    )
+    if (matchedGroup) {
+      setManualTargetGroup(matchedGroup.id)
+    } else if (q.grade) {
+      setManualTargetGroup(`grade:${q.grade}`)
+    }
+
+    const qLesson = q.lesson || extractLessonFromTopic(q.topic) || ''
+    setLesson(qLesson)
+
+    const topicParts = (q.topic || '').split('|').map((p) => p.trim())
+    const cleanTopic =
+      topicParts.find(
+        (p) =>
+          p !== qLesson &&
+          !p.startsWith('الدرس') &&
+          !groups.some((g) => g.name === p)
+      ) || ''
+    setTopic(cleanTopic)
+
+    setDifficulty((q.difficulty as any) || 'medium')
+    setImageFile(null)
+    setImagePreviewUrl(null)
+    setExistingImagePath(q.image_path || null)
+    setManualModalOpen(true)
+  }
+
+  // Close manual modal and reset edit state
+  const handleCloseManualModal = () => {
+    setManualModalOpen(false)
+    setEditingQuestion(null)
+    setExistingImagePath(null)
+    setImageFile(null)
+    setImagePreviewUrl(null)
+  }
 
   // Import Modal (JSON or Excel)
   const [importModalOpen, setImportModalOpen] = useState(false)
@@ -123,20 +218,43 @@ export function QuestionsView({
   const [downloadingSample, setDownloadingSample] = useState(false)
   const [previewImage, setPreviewImage] = useState<string | null>(null)
 
+  // Compute unique lessons for the currently filtered grade / group
+  const availableLessons = React.useMemo(() => {
+    const set = new Set<string>()
+    questions.forEach((q) => {
+      const matchesGrade = gradeFilter === 'all' || q.grade === gradeFilter
+      const matchesGroup =
+        groupFilter === 'all' ||
+        (q.topic && q.topic.includes(groupFilter)) ||
+        q.grade === groupFilter
+
+      if (matchesGrade && matchesGroup) {
+        const l = q.lesson || extractLessonFromTopic(q.topic)
+        if (l && l.trim()) {
+          set.add(l.trim())
+        }
+      }
+    })
+    return Array.from(set).sort()
+  }, [questions, gradeFilter, groupFilter])
+
   // Filtered list
   const filteredQuestions = questions.filter((q) => {
+    const qLesson = q.lesson || extractLessonFromTopic(q.topic)
     const matchesSearch =
       q.body.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (q.topic && q.topic.toLowerCase().includes(searchTerm.toLowerCase()))
+      (q.topic && q.topic.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (qLesson && qLesson.toLowerCase().includes(searchTerm.toLowerCase()))
     const matchesGrade = gradeFilter === 'all' || q.grade === gradeFilter
     const matchesGroup =
       groupFilter === 'all' ||
       (q.topic && q.topic.includes(groupFilter)) ||
       q.grade === groupFilter
-    return matchesSearch && matchesGrade && matchesGroup
+    const matchesLesson = lessonFilter === 'all' || qLesson === lessonFilter
+    return matchesSearch && matchesGrade && matchesGroup && matchesLesson
   })
 
-  // Submit Single Question
+  // Submit Single Question (Add or Update)
   const handleManualSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!body.trim()) return
@@ -149,7 +267,7 @@ export function QuestionsView({
 
     setLoadingAdd(true)
     try {
-      let uploadedImagePath: string | undefined = undefined
+      let uploadedImagePath: string | null | undefined = existingImagePath
 
       if (imageFile) {
         try {
@@ -176,31 +294,39 @@ export function QuestionsView({
         ? manualTargetGroup.replace('grade:', '')
         : grade
       const groupPrefix = selectedGrp ? `${selectedGrp.name}` : ''
-      let finalTopic = topic.trim()
-      if (groupPrefix && !finalTopic.includes(groupPrefix)) {
-        finalTopic = finalTopic ? `${groupPrefix} | ${finalTopic}` : groupPrefix
-      }
+      const finalTopic = formatQuestionTopic(groupPrefix, topic.trim(), lesson.trim())
 
-      await onAddQuestion({
-        body: body.trim(),
+      const questionPayload = {
+        body: cleanGeminiArtifacts(body.trim()),
         type: questionType,
-        options: questionType === 'mcq' ? validOptions : [],
+        options: questionType === 'mcq' ? validOptions.map(cleanGeminiOption) : [],
         correct: questionType === 'mcq' ? [correctIdx >= validOptions.length ? 0 : correctIdx] : [],
         marks,
         grade: finalGrade,
+        lesson: lesson.trim() || undefined,
         topic: finalTopic || undefined,
         difficulty,
         image_path: uploadedImagePath,
-        model_answer: questionType === 'essay' && modelAnswer.trim() ? modelAnswer.trim() : undefined,
-      })
+        model_answer: questionType === 'essay' && modelAnswer.trim() ? cleanGeminiArtifacts(modelAnswer.trim()) : undefined,
+      }
+
+      if (editingQuestion && onUpdateQuestion) {
+        await onUpdateQuestion(editingQuestion.id, questionPayload)
+      } else {
+        await onAddQuestion(questionPayload)
+      }
 
       // Reset form
       setBody('')
       setModelAnswer('')
       setOptions(['', '', '', ''])
       setCorrectIdx(0)
+      setLesson('')
+      setTopic('')
       setImageFile(null)
       setImagePreviewUrl(null)
+      setExistingImagePath(null)
+      setEditingQuestion(null)
       setManualModalOpen(false)
     } catch (err) {
       console.error(err)
@@ -292,18 +418,17 @@ export function QuestionsView({
     try {
       await onBatchAddQuestions(
         parsedPreview.map((p) => {
-          let questionTopic = p.topic || ''
-          if (groupPrefix && !questionTopic.includes(groupPrefix)) {
-            questionTopic = questionTopic ? `${groupPrefix} | ${questionTopic}` : groupPrefix
-          }
+          const qLesson = p.lesson || extractLessonFromTopic(p.topic)
+          const finalTopic = formatQuestionTopic(groupPrefix, p.topic, qLesson)
           return {
-            body: p.body,
+            body: cleanGeminiArtifacts(p.body),
             type: 'mcq' as const,
-            options: p.options,
+            options: p.options.map(cleanGeminiOption),
             correct: p.correct,
             marks: p.marks,
             grade: finalGrade || p.grade || 'الصف الأول الثانوي',
-            topic: questionTopic || undefined,
+            lesson: qLesson || undefined,
+            topic: finalTopic || undefined,
             difficulty: p.difficulty,
             image_path: p.image_path,
           }
@@ -343,7 +468,7 @@ export function QuestionsView({
           </button>
 
           <button
-            onClick={() => setManualModalOpen(true)}
+            onClick={handleOpenAdd}
             disabled={!teacherStatus.isActive}
             className="inline-flex items-center gap-2 rounded-xl bg-[#1d5ca8] px-4 py-2.5 text-xs font-bold text-white shadow-md hover:bg-[#164e93] disabled:opacity-50"
           >
@@ -389,7 +514,10 @@ export function QuestionsView({
             <span className="text-xs font-bold text-slate-400">المرحلة:</span>
             <select
               value={gradeFilter}
-              onChange={(e) => setGradeFilter(e.target.value)}
+              onChange={(e) => {
+                setGradeFilter(e.target.value)
+                setLessonFilter('all')
+              }}
               className="rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 outline-hidden"
             >
               <option value="all">كل المراحل</option>
@@ -401,126 +529,166 @@ export function QuestionsView({
               <option value="الصف الثالث الثانوي">الصف الثالث الثانوي</option>
             </select>
           </div>
+
+          {availableLessons.length > 0 && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-bold text-slate-400">الدرس:</span>
+              <select
+                value={lessonFilter}
+                onChange={(e) => setLessonFilter(e.target.value)}
+                className="max-w-[200px] truncate rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 outline-hidden"
+              >
+                <option value="all">كل الدروس ({availableLessons.length})</option>
+                {availableLessons.map((l) => (
+                  <option key={l} value={l}>
+                    {l}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
       </div>
 
       {/* Questions List */}
       <div className="grid gap-3 sm:grid-cols-2">
-        {filteredQuestions.map((q, qIndex) => (
-          <div
-            key={q.id}
-            className="flex flex-col justify-between rounded-2xl border border-slate-200 bg-white p-5 shadow-xs"
-          >
-            <div>
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <span className={`rounded-md px-2 py-0.5 text-xs font-bold ${
-                    q.type === 'essay' ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-700'
-                  }`}>
-                    {q.type === 'essay' ? 'سؤال مقالي' : 'اختيار من متعدد'}
-                  </span>
-                  <span className="rounded-md bg-blue-50 px-2 py-0.5 text-xs font-bold text-[#1d5ca8]">
-                    {q.grade || 'عام'}
-                  </span>
-                  {q.topic && q.topic.includes('|') ? (
-                    <>
-                      <span className="rounded-md bg-purple-50 px-2 py-0.5 text-xs font-bold text-purple-700">
-                        👥 {q.topic.split('|')[0].trim()}
-                      </span>
-                      {q.topic.split('|')[1]?.trim() && (
-                        <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-600">
-                          {q.topic.split('|')[1].trim()}
-                        </span>
-                      )}
-                    </>
-                  ) : q.topic ? (
-                    <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-600">
-                      {q.topic}
+        {filteredQuestions.map((q, qIndex) => {
+          const qLesson = q.lesson || extractLessonFromTopic(q.topic)
+          return (
+            <div
+              key={q.id}
+              className="flex flex-col justify-between rounded-2xl border border-slate-200 bg-white p-5 shadow-xs"
+            >
+              <div>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className={`rounded-md px-2 py-0.5 text-xs font-bold ${
+                      q.type === 'essay' ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-700'
+                    }`}>
+                      {q.type === 'essay' ? 'سؤال مقالي' : 'اختيار من متعدد'}
                     </span>
-                  ) : null}
-                </div>
-
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-bold text-slate-500">{q.marks || 1} درجة</span>
-                  <button
-                    onClick={() => {
-                      if (confirm('هل أنت متأكد من حذف هذا السؤال من البنك؟')) {
-                        onDeleteQuestion(q.id)
-                      }
-                    }}
-                    disabled={!teacherStatus.isActive}
-                    className="p-1 text-slate-400 hover:text-rose-600 disabled:opacity-30"
-                  >
-                    <Trash2 className="size-4" />
-                  </button>
-                </div>
-              </div>
-
-              {/* Question Text */}
-              <p className="mt-3 text-sm font-bold text-slate-800 leading-relaxed">{q.body}</p>
-
-              {/* Optional image preview (Compact, centered, click to zoom) */}
-              {q.image_path && (
-                <div className="mt-2.5 flex justify-center">
-                  <div
-                    onClick={() => setPreviewImage(q.image_path || null)}
-                    className="group relative cursor-pointer overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-1.5 shadow-2xs hover:border-[#1d5ca8]/40"
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={q.image_path}
-                      alt="سؤال"
-                      className="max-h-32 sm:max-h-36 w-auto max-w-full rounded-lg object-contain"
-                    />
-                    <div className="absolute bottom-2 left-2 flex items-center gap-1 rounded-md bg-slate-900/70 px-1.5 py-0.5 text-[9px] font-bold text-white backdrop-blur-xs opacity-0 group-hover:opacity-100 transition">
-                      <ZoomIn className="size-2.5" />
-                      <span>تكبير</span>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Options or Essay Indicator */}
-              {q.type === 'essay' ? (
-                <div className="mt-3.5 rounded-xl border border-amber-200 bg-amber-50/60 p-3 text-xs">
-                  <div className="flex items-center gap-1.5 font-bold text-amber-800">
-                    <span>✍️ سؤال مقالي (تصحيح يدوي من المعلم)</span>
-                  </div>
-                  {q.model_answer && (
-                    <div className="mt-2 text-slate-700">
-                      <span className="font-bold text-slate-900">نموذج الإجابة: </span>
-                      {q.model_answer}
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="mt-3.5 space-y-1.5">
-                  {(q.options || []).map((opt, oIdx) => {
-                    const isCorrect = q.correct?.includes(oIdx)
-                    return (
-                      <div
-                        key={oIdx}
-                        className={`flex items-center justify-between rounded-xl px-3 py-2 text-xs font-semibold ${
-                          isCorrect
-                            ? 'border border-emerald-300 bg-emerald-50 text-emerald-800'
-                            : 'bg-slate-50 text-slate-600'
-                        }`}
-                      >
-                        <span>{opt}</span>
-                        {isCorrect && (
-                          <span className="flex items-center gap-1 text-[11px] font-bold text-emerald-700">
-                            <CheckCircle2 className="size-3.5" />
-                            إجابة صحيحة
+                    <span className="rounded-md bg-blue-50 px-2 py-0.5 text-xs font-bold text-[#1d5ca8]">
+                      {q.grade || 'عام'}
+                    </span>
+                    {qLesson && (
+                      <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-0.5 text-xs font-bold text-emerald-800 border border-emerald-200/70">
+                        <BookMarked className="size-3 text-emerald-600" />
+                        <span>{qLesson}</span>
+                      </span>
+                    )}
+                    {q.topic && q.topic.includes('|') ? (
+                      <>
+                        <span className="rounded-md bg-purple-50 px-2 py-0.5 text-xs font-bold text-purple-700">
+                          👥 {q.topic.split('|')[0].trim()}
+                        </span>
+                        {q.topic.split('|')[1]?.trim() && q.topic.split('|')[1]?.trim() !== qLesson && (
+                          <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-600">
+                            {q.topic.split('|')[1].trim()}
                           </span>
                         )}
-                      </div>
-                    )
-                  })}
+                      </>
+                    ) : q.topic && q.topic !== qLesson ? (
+                      <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-600">
+                        {q.topic}
+                      </span>
+                    ) : null}
+                  </div>
+
+                  <div className="flex items-center gap-1">
+                    <span className="text-xs font-bold text-slate-500 ml-1">{q.marks || 1} درجة</span>
+                    <button
+                      onClick={() => handleOpenEdit(q)}
+                      disabled={!teacherStatus.isActive}
+                      className="rounded-lg p-1.5 text-slate-400 hover:bg-blue-50 hover:text-[#1d5ca8] transition disabled:opacity-30"
+                      title="تعديل السؤال وإضافة أو تعديل الصورة"
+                    >
+                      <Edit3 className="size-4" />
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (confirm('هل أنت متأكد من حذف هذا السؤال من البنك؟')) {
+                          onDeleteQuestion(q.id)
+                        }
+                      }}
+                      disabled={!teacherStatus.isActive}
+                      className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600 transition disabled:opacity-30"
+                      title="حذف السؤال"
+                    >
+                      <Trash2 className="size-4" />
+                    </button>
+                  </div>
                 </div>
-              )}
+
+                {/* Question Text (rendered with MathRenderer for math formulas & span cleaning) */}
+                <MathRenderer
+                  text={q.body}
+                  as="p"
+                  className="mt-3 text-sm font-bold text-slate-800 leading-relaxed"
+                />
+
+                {/* Optional image preview (Compact, centered, click to zoom) */}
+                {q.image_path && (
+                  <div className="mt-2.5 flex justify-center">
+                    <div
+                      onClick={() => setPreviewImage(q.image_path || null)}
+                      className="group relative cursor-pointer overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-1.5 shadow-2xs hover:border-[#1d5ca8]/40"
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={q.image_path}
+                        alt="سؤال"
+                        className="max-h-32 sm:max-h-36 w-auto max-w-full rounded-lg object-contain"
+                      />
+                      <div className="absolute bottom-2 left-2 flex items-center gap-1 rounded-md bg-slate-900/70 px-1.5 py-0.5 text-[9px] font-bold text-white backdrop-blur-xs opacity-0 group-hover:opacity-100 transition">
+                        <ZoomIn className="size-2.5" />
+                        <span>تكبير</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Options or Essay Indicator */}
+                {q.type === 'essay' ? (
+                  <div className="mt-3.5 rounded-xl border border-amber-200 bg-amber-50/60 p-3 text-xs">
+                    <div className="flex items-center gap-1.5 font-bold text-amber-800">
+                      <span>✍️ سؤال مقالي (تصحيح يدوي من المعلم)</span>
+                    </div>
+                    {q.model_answer && (
+                      <div className="mt-2 text-slate-700">
+                        <span className="font-bold text-slate-900">نموذج الإجابة: </span>
+                        <MathRenderer text={q.model_answer} as="span" />
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="mt-3.5 space-y-1.5">
+                    {(q.options || []).map((opt, oIdx) => {
+                      const isCorrect = q.correct?.includes(oIdx)
+                      return (
+                        <div
+                          key={oIdx}
+                          className={`flex items-center justify-between rounded-xl px-3 py-2 text-xs font-semibold ${
+                            isCorrect
+                              ? 'border border-emerald-300 bg-emerald-50 text-emerald-800'
+                              : 'bg-slate-50 text-slate-600'
+                          }`}
+                        >
+                          <MathRenderer text={opt} as="span" />
+                          {isCorrect && (
+                            <span className="flex items-center gap-1 text-[11px] font-bold text-emerald-700 shrink-0 mr-2">
+                              <CheckCircle2 className="size-3.5" />
+                              إجابة صحيحة
+                            </span>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          )
+        })}
 
         {filteredQuestions.length === 0 && (
           <div className="col-span-full rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center text-slate-400">
@@ -533,11 +701,11 @@ export function QuestionsView({
         )}
       </div>
 
-      {/* Manual Add Question Modal */}
+      {/* Manual Add / Edit Question Modal */}
       <Modal
         isOpen={manualModalOpen}
-        onClose={() => setManualModalOpen(false)}
-        title="إضافة سؤال جديد لبنك الأسئلة"
+        onClose={handleCloseManualModal}
+        title={editingQuestion ? 'تعديل بيانات السؤال' : 'إضافة سؤال جديد لبنك الأسئلة'}
         maxWidth="max-w-2xl"
       >
         <form onSubmit={handleManualSubmit} className="space-y-4">
@@ -629,7 +797,7 @@ export function QuestionsView({
             </div>
           )}
 
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="mb-1 block text-xs font-bold text-slate-700">المجموعة المستهدفة / المرحلة</label>
               <select
@@ -663,12 +831,25 @@ export function QuestionsView({
             </div>
 
             <div>
-              <label className="mb-1 block text-xs font-bold text-slate-700">الموضوع / الوحدة</label>
+              <label className="mb-1 block text-xs font-bold text-slate-700">
+                اسم أو رقم الدرس <span className="text-[#1d5ca8] font-normal">(للتوزيع العشوائي في الاختبارات)</span>
+              </label>
+              <input
+                type="text"
+                value={lesson}
+                onChange={(e) => setLesson(e.target.value)}
+                placeholder="مثال: الدرس الأول: نظرية ذات الحدين أو 1"
+                className="w-full rounded-xl border border-slate-200 p-2 text-xs outline-hidden focus:border-[#1d5ca8]"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-700">الوحدة / الفرع (اختياري)</label>
               <input
                 type="text"
                 value={topic}
                 onChange={(e) => setTopic(e.target.value)}
-                placeholder="مثال: الجبر - الدرس الثاني"
+                placeholder="مثال: الجبر أو الهندسة"
                 className="w-full rounded-xl border border-slate-200 p-2 text-xs outline-hidden"
               />
             </div>
@@ -686,9 +867,65 @@ export function QuestionsView({
             </div>
           </div>
 
-          {/* Optional image attachment */}
+          {/* Image attachment / modification */}
           <div>
-            <label className="mb-1 block text-xs font-bold text-slate-700">صورة توضيحية / مسألة (اختياري)</label>
+            <label className="mb-1.5 block text-xs font-bold text-slate-700">
+              صورة توضيحية / مسألة (اختياري)
+            </label>
+
+            {/* Current saved image if editing */}
+            {existingImagePath && !imagePreviewUrl && (
+              <div className="mb-2.5 flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 p-2.5">
+                <div className="flex items-center gap-2.5">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={existingImagePath}
+                    alt="صورة السؤال الحالية"
+                    className="h-14 w-14 rounded-lg border border-slate-200 bg-white object-contain p-1 shadow-2xs"
+                  />
+                  <div>
+                    <p className="text-xs font-bold text-slate-700">الصورة الحالية للسؤال</p>
+                    <p className="text-[11px] text-slate-400">يمكنك الإبقاء عليها أو استبدالها بصورة جديدة أدناه</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setExistingImagePath(null)}
+                  className="rounded-lg bg-rose-50 px-2.5 py-1.5 text-xs font-bold text-rose-600 hover:bg-rose-100 transition"
+                >
+                  حذف الصورة
+                </button>
+              </div>
+            )}
+
+            {/* New chosen image preview */}
+            {imagePreviewUrl && (
+              <div className="mb-2.5 flex items-center justify-between gap-3 rounded-xl border border-blue-200 bg-blue-50/60 p-2.5">
+                <div className="flex items-center gap-2.5">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={imagePreviewUrl}
+                    alt="معاينة الصورة الجديدة"
+                    className="h-14 w-14 rounded-lg border border-blue-200 bg-white object-contain p-1 shadow-2xs"
+                  />
+                  <div>
+                    <p className="text-xs font-bold text-[#153b68]">تم اختيار صورة جديدة</p>
+                    <p className="text-[11px] text-slate-500">سيتم ضغطها ورفعها مع حفظ السؤال</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setImageFile(null)
+                    setImagePreviewUrl(null)
+                  }}
+                  className="rounded-lg bg-rose-50 px-2.5 py-1.5 text-xs font-bold text-rose-600 hover:bg-rose-100 transition"
+                >
+                  إلغاء الصورة الجديدة
+                </button>
+              </div>
+            )}
+
             <input
               type="file"
               accept="image/*"
@@ -701,33 +938,17 @@ export function QuestionsView({
                   setImagePreviewUrl(null)
                 }
               }}
-              className="text-xs text-slate-500"
+              className="w-full text-xs text-slate-500 file:mr-2 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-[#1d5ca8] hover:file:bg-slate-200"
             />
-            {imagePreviewUrl && (
-              <div className="mt-2 flex items-center gap-2">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={imagePreviewUrl} alt="معاينة" className="h-16 w-auto rounded-lg border object-contain" />
-                <button
-                  type="button"
-                  onClick={() => {
-                    setImageFile(null)
-                    setImagePreviewUrl(null)
-                  }}
-                  className="rounded-lg bg-rose-50 px-2 py-1 text-[11px] font-bold text-rose-600 hover:bg-rose-100"
-                >
-                  إزالة الصورة
-                </button>
-              </div>
-            )}
             <p className="mt-1 text-[11px] text-slate-400">
-              يتم ضغط الصورة تلقائياً لتوفير مساحة التخزين وتكون بحجم مناسب ومقروء للطالب.
+              يتم ضغط الصورة تلقائياً لتوفير مساحة التخزين وتكون بحجم مناسب ومقروء للطالب في الامتحانات.
             </p>
           </div>
 
           <div className="mt-5 flex justify-end gap-2 pt-2">
             <button
               type="button"
-              onClick={() => setManualModalOpen(false)}
+              onClick={handleCloseManualModal}
               className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50"
             >
               إلغاء
@@ -738,7 +959,7 @@ export function QuestionsView({
               className="inline-flex items-center gap-1.5 rounded-xl bg-[#1d5ca8] px-5 py-2 text-xs font-bold text-white shadow-xs hover:bg-[#164e93] disabled:opacity-50"
             >
               {loadingAdd && <Loader2 className="size-3.5 animate-spin" />}
-              حفظ في البنك
+              {editingQuestion ? 'حفظ التعديلات' : 'حفظ في البنك'}
             </button>
           </div>
         </form>
@@ -943,17 +1164,29 @@ export function QuestionsView({
                   </span>
                 )}
               </div>
-              <div className="max-h-40 overflow-y-auto rounded-xl border border-slate-200 p-2 text-xs space-y-2">
-                {parsedPreview.map((p, i) => (
-                  <div key={i} className="border-b pb-1 last:border-0">
-                    <p className="font-bold text-slate-800">
-                      {i + 1}. {p.body}
-                    </p>
-                    <p className="text-[11px] text-slate-500">
-                      الخيارات ({p.options.length}) · الدرجة: {p.marks}
-                    </p>
-                  </div>
-                ))}
+              <div className="max-h-48 overflow-y-auto rounded-xl border border-slate-200 p-2 text-xs space-y-2">
+                {parsedPreview.map((p, i) => {
+                  const pLesson = p.lesson || extractLessonFromTopic(p.topic)
+                  return (
+                    <div key={i} className="border-b pb-2 last:border-0">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="font-bold text-slate-800 flex-1 min-w-0">
+                          <span className="ml-1 text-slate-500">{i + 1}.</span>
+                          <MathRenderer text={p.body} as="span" />
+                        </div>
+                        {pLesson && (
+                          <span className="shrink-0 rounded-md bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-800 border border-emerald-200/60">
+                            📖 {pLesson}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-1">
+                        الخيارات ({p.options.length}) · الدرجة: {p.marks}
+                        {p.grade && <span> · {p.grade}</span>}
+                      </p>
+                    </div>
+                  )
+                })}
               </div>
 
               <div className="flex justify-end gap-2 pt-2">

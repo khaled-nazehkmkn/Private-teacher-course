@@ -85,7 +85,7 @@ export async function POST(request: Request) {
       await adminClient.from('makeup_requests').delete().eq('teacher_id', user.id)
 
       // 2. Delete attendance records for this teacher
-      await adminClient.from('attendance_records').delete().eq('teacher_id', user.id)
+      await adminClient.from('attendance').delete().eq('teacher_id', user.id)
 
       // 3. Delete session occurrences for this teacher
       await adminClient.from('session_occurrences').delete().eq('teacher_id', user.id)

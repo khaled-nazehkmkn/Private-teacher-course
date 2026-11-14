@@ -24,11 +24,16 @@ import {
   ZoomIn,
   FileText,
   Image as ImageIcon,
+  BookMarked,
+  Layers,
+  Minus,
+  RotateCcw,
 } from 'lucide-react'
 import { Modal } from '@/components/ui/modal'
 import { DateTimePicker } from '@/components/ui/datetime-picker'
 import { QRCodeModal } from '@/components/QRCodeModal'
 import { buildWhatsAppLink, formatExamResultMessage } from '@/lib/whatsapp'
+import { MathRenderer, cleanGeminiArtifacts, extractLessonFromTopic } from '@/components/ui/math-renderer'
 import type { TeacherStatus } from '@/lib/teacher-status'
 import type { GroupItem } from '../groups/GroupsView'
 import type { QuestionBankItem } from '../questions/QuestionsView'
@@ -119,9 +124,42 @@ export function ExamsView({
   const [closesAt, setClosesAt] = useState('')
   const [shuffle, setShuffle] = useState(true)
   const [selectionMode, setSelectionMode] = useState<'pick' | 'random'>('random')
+  const [randomStrategy, setRandomStrategy] = useState<'by_lesson' | 'all'>('by_lesson')
   const [randomCount, setRandomCount] = useState(10)
+  const [lessonCounts, setLessonCounts] = useState<Record<string, number>>({})
   const [selectedQuestionIds, setSelectedQuestionIds] = useState<string[]>([])
+  const [manualPickLessonFilter, setManualPickLessonFilter] = useState('all')
   const [savingExam, setSavingExam] = useState(false)
+
+  // Compute matching questions for currently selected group or grade
+  const targetGroup = groups.find((g) => g.id === targetGroupId)
+  const matchingQuestions = React.useMemo(() => {
+    if (!targetGroup) return questions
+    return questions.filter((q) => {
+      const matchesGroup = q.topic && q.topic.includes(targetGroup.name)
+      const matchesGrade =
+        q.grade === targetGroup.grade ||
+        q.grade === targetGroup.name ||
+        (q.grade && targetGroup.grade && q.grade.trim() === targetGroup.grade.trim())
+      return matchesGroup || matchesGrade
+    })
+  }, [questions, targetGroup])
+
+  // Group matching questions by lesson
+  const availableLessonGroups = React.useMemo(() => {
+    const pool = matchingQuestions.length > 0 ? matchingQuestions : questions
+    const map: Record<string, QuestionBankItem[]> = {}
+
+    pool.forEach((q) => {
+      const lessonName = q.lesson || extractLessonFromTopic(q.topic) || 'عام / بدون درس محدد'
+      if (!map[lessonName]) {
+        map[lessonName] = []
+      }
+      map[lessonName].push(q)
+    })
+
+    return map
+  }, [matchingQuestions, questions])
 
   // Print PDF Modal
   const [printModalOpen, setPrintModalOpen] = useState(false)
@@ -227,27 +265,37 @@ export function ExamsView({
     let finalQuestionIds = [...selectedQuestionIds]
 
     if (selectionMode === 'random') {
-      const targetGroup = groups.find((g) => g.id === targetGroupId)
-      const matchingQuestions = questions.filter((q) => {
-        if (!targetGroup) return true
-        const matchesGroup = q.topic && q.topic.includes(targetGroup.name)
-        const matchesGrade =
-          q.grade === targetGroup.grade ||
-          q.grade === targetGroup.name ||
-          (q.grade && targetGroup.grade && q.grade.trim() === targetGroup.grade.trim())
-        return matchesGroup || matchesGrade
-      })
+      if (randomStrategy === 'by_lesson') {
+        const pickedIds: string[] = []
+        Object.entries(availableLessonGroups).forEach(([lessonName, qList]) => {
+          const count = lessonCounts[lessonName] || 0
+          if (count > 0) {
+            const shuffled = [...qList].sort(() => Math.random() - 0.5)
+            const chosen = shuffled.slice(0, Math.min(count, qList.length)).map((q) => q.id)
+            pickedIds.push(...chosen)
+          }
+        })
 
-      const pool = matchingQuestions.length > 0 ? matchingQuestions : questions
+        if (pickedIds.length === 0) {
+          alert('يرجى تحديد عدد الأسئلة المطلوبة من درس واحد على الأقل.')
+          return
+        }
 
-      if (pool.length === 0) {
-        alert('لا توجد أسئلة في بنك الأسئلة كافية لإنشاء هذا الاختبار')
-        return
+        finalQuestionIds = pickedIds
+      } else {
+        const pool = matchingQuestions.length > 0 ? matchingQuestions : questions
+        if (pool.length === 0) {
+          alert('لا توجد أسئلة في بنك الأسئلة كافية لإنشاء هذا الاختبار')
+          return
+        }
+        // Pick random
+        const shuffledPool = [...pool].sort(() => Math.random() - 0.5)
+        finalQuestionIds = shuffledPool.slice(0, randomCount).map((q) => q.id)
       }
 
-      // Pick random
-      const shuffledPool = [...pool].sort(() => Math.random() - 0.5)
-      finalQuestionIds = shuffledPool.slice(0, randomCount).map((q) => q.id)
+      if (shuffle) {
+        finalQuestionIds = [...finalQuestionIds].sort(() => Math.random() - 0.5)
+      }
     }
 
     if (finalQuestionIds.length === 0) {
@@ -272,6 +320,7 @@ export function ExamsView({
       setCreateModalOpen(false)
       setTitle('')
       setSelectedQuestionIds([])
+      setLessonCounts({})
     } catch (err) {
       console.error(err)
       alert('فشل إنشاء الاختبار')
@@ -547,64 +596,261 @@ export function ExamsView({
             </div>
 
             {selectionMode === 'random' ? (
-              <div className="mt-2 flex items-center gap-3 rounded-xl bg-slate-50 p-3 text-xs">
-                <span>عدد الأسئلة العشوائية المطلوبة:</span>
-                <input
-                  type="number"
-                  min="1"
-                  max="50"
-                  value={randomCount}
-                  onChange={(e) => setRandomCount(Number(e.target.value))}
-                  className="w-20 rounded-lg border border-slate-200 bg-white p-1 text-center font-bold"
-                />
+              <div className="space-y-3 pt-1">
+                {/* Random Strategy Switcher */}
+                <div className="flex gap-2 rounded-xl bg-slate-100 p-1 text-xs font-bold">
+                  <button
+                    type="button"
+                    onClick={() => setRandomStrategy('by_lesson')}
+                    className={`flex-1 rounded-lg py-1.5 transition flex items-center justify-center gap-1.5 ${
+                      randomStrategy === 'by_lesson'
+                        ? 'bg-white text-[#1d5ca8] shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <BookMarked className="size-3.5" />
+                    <span>توزيع مخصص حسب الدروس (موصى به)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRandomStrategy('all')}
+                    className={`flex-1 rounded-lg py-1.5 transition flex items-center justify-center gap-1.5 ${
+                      randomStrategy === 'all'
+                        ? 'bg-white text-[#1d5ca8] shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <Shuffle className="size-3.5" />
+                    <span>عشوائي سريع من كامل الأسئلة</span>
+                  </button>
+                </div>
+
+                {randomStrategy === 'by_lesson' ? (
+                  <div className="space-y-2 rounded-2xl border border-blue-200 bg-blue-50/50 p-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 pb-2 border-b border-blue-100">
+                      <div>
+                        <p className="text-xs font-bold text-[#153b68]">
+                          حدد عدد الأسئلة المطلوبة عشوائياً من كل درس:
+                        </p>
+                        <p className="text-[11px] text-blue-700">
+                          سيتم سحب الأسئلة عشوائياً لكل طالب وفق عدد الأسئلة المحدد لكل درس.
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const allCounts: Record<string, number> = {}
+                            Object.entries(availableLessonGroups).forEach(([l, list]) => {
+                              allCounts[l] = list.length
+                            })
+                            setLessonCounts(allCounts)
+                          }}
+                          className="text-[11px] font-bold text-[#1d5ca8] hover:underline"
+                        >
+                          تحديد الكل
+                        </button>
+                        <span className="text-slate-300">|</span>
+                        <button
+                          type="button"
+                          onClick={() => setLessonCounts({})}
+                          className="text-[11px] font-bold text-rose-600 hover:underline"
+                        >
+                          تصفير
+                        </button>
+                      </div>
+                    </div>
+
+                    {Object.keys(availableLessonGroups).length === 0 ? (
+                      <p className="text-center py-4 text-xs font-bold text-slate-400">
+                        لا توجد أسئلة مسجلة لهذه المرحلة في بنك الأسئلة حالياً.
+                      </p>
+                    ) : (
+                      <div className="max-h-56 overflow-y-auto space-y-2 pr-1">
+                        {Object.entries(availableLessonGroups).map(([lessonName, qList]) => {
+                          const count = lessonCounts[lessonName] || 0
+                          const max = qList.length
+
+                          return (
+                            <div
+                              key={lessonName}
+                              className={`flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-xl border p-2.5 transition ${
+                                count > 0
+                                  ? 'border-[#1d5ca8]/40 bg-white shadow-xs'
+                                  : 'border-slate-200/80 bg-white/70'
+                              }`}
+                            >
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5">
+                                  <BookMarked className="size-3.5 text-[#1d5ca8] shrink-0" />
+                                  <span className="text-xs font-bold text-slate-800 truncate">
+                                    {lessonName}
+                                  </span>
+                                </div>
+                                <span className="text-[11px] text-slate-400 font-semibold mr-5">
+                                  متوفر في البنك: {max} {max === 1 ? 'سؤال' : 'أسئلة'}
+                                </span>
+                              </div>
+
+                              <div className="flex items-center gap-2 self-end sm:self-center">
+                                <div className="flex items-center rounded-lg border border-slate-200 bg-slate-50">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setLessonCounts((prev) => ({
+                                        ...prev,
+                                        [lessonName]: Math.max(0, (prev[lessonName] || 0) - 1),
+                                      }))
+                                    }
+                                    className="px-2 py-1 text-xs font-bold text-slate-600 hover:bg-slate-200 rounded-r-lg"
+                                  >
+                                    -
+                                  </button>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    max={max}
+                                    value={count}
+                                    onChange={(e) => {
+                                      const val = Math.max(0, Math.min(max, Number(e.target.value) || 0))
+                                      setLessonCounts((prev) => ({
+                                        ...prev,
+                                        [lessonName]: val,
+                                      }))
+                                    }}
+                                    className="w-12 text-center text-xs font-bold bg-white py-1 outline-hidden"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setLessonCounts((prev) => ({
+                                        ...prev,
+                                        [lessonName]: Math.min(max, (prev[lessonName] || 0) + 1),
+                                      }))
+                                    }
+                                    className="px-2 py-1 text-xs font-bold text-slate-600 hover:bg-slate-200 rounded-l-lg"
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setLessonCounts((prev) => ({
+                                      ...prev,
+                                      [lessonName]: max,
+                                    }))
+                                  }
+                                  className="rounded-lg bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-600 hover:bg-slate-200"
+                                >
+                                  الكل ({max})
+                                </button>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+
+                    {/* Summary Counter */}
+                    <div className="flex items-center justify-between rounded-xl bg-blue-100/70 px-3 py-2 text-xs font-bold text-[#153b68]">
+                      <span>إجمالي الأسئلة العشوائية المحددة للاختبار:</span>
+                      <span className="rounded-lg bg-[#1d5ca8] px-2.5 py-0.5 text-white">
+                        {Object.values(lessonCounts).reduce((a, b) => a + (b || 0), 0)} سؤال
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-3 rounded-xl bg-slate-50 p-3 text-xs">
+                    <span className="font-bold text-slate-700">عدد الأسئلة العشوائية المطلوبة:</span>
+                    <input
+                      type="number"
+                      min="1"
+                      max="100"
+                      value={randomCount}
+                      onChange={(e) => setRandomCount(Number(e.target.value))}
+                      className="w-20 rounded-lg border border-slate-200 bg-white p-1 text-center font-bold"
+                    />
+                    <span className="text-[11px] text-slate-400">
+                      (سيتم اختيارها عشوائياً من كامل بنك الأسئلة المتاح لهذه المرحلة)
+                    </span>
+                  </div>
+                )}
               </div>
             ) : (
-              <div className="max-h-48 overflow-y-auto rounded-xl border border-slate-200 p-2 text-xs space-y-1.5">
-                {(() => {
-                  const targetGroup = groups.find((g) => g.id === targetGroupId)
-                  const matching = targetGroup
-                    ? questions.filter((q) => {
-                        const matchesGroup = q.topic && q.topic.includes(targetGroup.name)
-                        const matchesGrade =
-                          q.grade === targetGroup.grade ||
-                          q.grade === targetGroup.name ||
-                          (q.grade && targetGroup.grade && q.grade.trim() === targetGroup.grade.trim())
-                        return matchesGroup || matchesGrade
-                      })
-                    : questions
-                  const listToRender = matching.length > 0 ? matching : questions
-
-                  return listToRender.map((q) => {
-                    const isChecked = selectedQuestionIds.includes(q.id)
-                    return (
-                      <label
-                        key={q.id}
-                        className="flex items-start gap-2 rounded-lg p-1.5 hover:bg-slate-50 cursor-pointer"
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs pb-1">
+                  <span className="font-bold text-slate-600">
+                    تم تحديد {selectedQuestionIds.length} سؤال يدوي
+                  </span>
+                  {Object.keys(availableLessonGroups).length > 1 && (
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11px] font-bold text-slate-400">تصفية بالدرس:</span>
+                      <select
+                        value={manualPickLessonFilter}
+                        onChange={(e) => setManualPickLessonFilter(e.target.value)}
+                        className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs outline-hidden"
                       >
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setSelectedQuestionIds((prev) => [...prev, q.id])
-                            } else {
-                              setSelectedQuestionIds((prev) => prev.filter((id) => id !== q.id))
-                            }
-                          }}
-                          className="mt-0.5"
-                        />
-                        <div className="min-w-0 flex-1">
-                          <p className="font-semibold text-slate-800">{q.body}</p>
-                          <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
-                            <span>{q.grade}</span>
-                            {q.topic && <span>· {q.topic}</span>}
-                            <span>· {q.marks} درجة</span>
+                        <option value="all">كل الدروس ({Object.keys(availableLessonGroups).length})</option>
+                        {Object.keys(availableLessonGroups).map((l) => (
+                          <option key={l} value={l}>
+                            {l} ({availableLessonGroups[l]?.length})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
+
+                <div className="max-h-52 overflow-y-auto rounded-xl border border-slate-200 p-2 text-xs space-y-1.5">
+                  {(() => {
+                    const pool = matchingQuestions.length > 0 ? matchingQuestions : questions
+                    const listToRender = pool.filter((q) => {
+                      if (manualPickLessonFilter === 'all') return true
+                      const l = q.lesson || extractLessonFromTopic(q.topic) || 'عام / بدون درس محدد'
+                      return l === manualPickLessonFilter
+                    })
+
+                    return listToRender.map((q) => {
+                      const isChecked = selectedQuestionIds.includes(q.id)
+                      const qLesson = q.lesson || extractLessonFromTopic(q.topic)
+
+                      return (
+                        <label
+                          key={q.id}
+                          className="flex items-start gap-2 rounded-lg p-2 hover:bg-slate-50 cursor-pointer border border-transparent hover:border-slate-200"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedQuestionIds((prev) => [...prev, q.id])
+                              } else {
+                                setSelectedQuestionIds((prev) => prev.filter((id) => id !== q.id))
+                              }
+                            }}
+                            className="mt-1"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <MathRenderer text={q.body} as="p" className="font-semibold text-slate-800" />
+                            <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500 font-semibold">
+                              <span className="rounded bg-slate-100 px-1.5 py-0.5">{q.grade}</span>
+                              {qLesson && (
+                                <span className="rounded bg-emerald-50 text-emerald-800 px-1.5 py-0.5 border border-emerald-200/60">
+                                  📖 {qLesson}
+                                </span>
+                              )}
+                              <span className="rounded bg-blue-50 text-[#1d5ca8] px-1.5 py-0.5">
+                                {q.marks} درجة
+                              </span>
+                            </div>
                           </div>
-                        </div>
-                      </label>
-                    )
-                  })
-                })()}
+                        </label>
+                      )
+                    })
+                  })()}
+                </div>
               </div>
             )}
           </div>
@@ -831,7 +1077,7 @@ export function ExamsView({
                       <div className="flex items-start justify-between gap-3">
                         <h4 className="text-sm font-bold text-slate-900 leading-relaxed">
                           <span className="ml-1.5 font-black text-slate-950">س {idx + 1}:</span>
-                          {q.body}
+                          <MathRenderer text={q.body} as="span" />
                         </h4>
                         <span className="shrink-0 rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-600">
                           ({q.marks || 1} درجات)
@@ -873,7 +1119,7 @@ export function ExamsView({
                                 <span className="flex size-5 shrink-0 items-center justify-center rounded-full border border-slate-400 text-[10px] font-bold">
                                   {letters[oIdx] || oIdx + 1}
                                 </span>
-                                <span>{opt}</span>
+                                <MathRenderer text={opt} as="span" />
                               </div>
                             )
                           })}
@@ -965,7 +1211,7 @@ export function ExamsView({
                     </div>
 
                     {/* Question Body */}
-                    <p className="text-sm font-bold text-slate-900 leading-relaxed">{q.body}</p>
+                    <MathRenderer text={q.body} as="p" className="text-sm font-bold text-slate-900 leading-relaxed" />
 
                     {/* Question Image */}
                     {q.image_path && (
@@ -987,16 +1233,17 @@ export function ExamsView({
                           {q.is_correct ? (
                             <span className="inline-flex items-center gap-1 font-bold text-emerald-700">
                               <CheckCircle2 className="size-4" />
-                              <span>
-                                صحيحة: {q.options?.[studentAns?.selected_index] || 'الخيار المحدد'}
-                              </span>
+                              <span>صحيحة: </span>
+                              <MathRenderer text={q.options?.[studentAns?.selected_index] || 'الخيار المحدد'} as="span" />
                             </span>
                           ) : (
                             <span className="inline-flex items-center gap-1 font-bold text-rose-600">
                               <XCircle className="size-4" />
-                              <span>
-                                خاطئة: {q.options?.[studentAns?.selected_index] || 'إجابة غير صحيحة'} (الإجابة الصحيحة: {q.options?.[q.correct?.[0]]})
-                              </span>
+                              <span>خاطئة: </span>
+                              <MathRenderer text={q.options?.[studentAns?.selected_index] || 'إجابة غير صحيحة'} as="span" />
+                              <span> (الإجابة الصحيحة: </span>
+                              <MathRenderer text={q.options?.[q.correct?.[0]]} as="span" />
+                              <span>)</span>
                             </span>
                           )}
                         </div>
@@ -1013,9 +1260,11 @@ export function ExamsView({
                         {(q.model_answer || (Array.isArray(q.correct) && q.correct.length > 0 && typeof q.correct[0] === 'string')) && (
                           <div className="rounded-lg bg-emerald-50/70 p-2.5 border border-emerald-200 text-xs">
                             <span className="font-bold text-emerald-900">💡 نموذج الإجابة للمقارنة: </span>
-                            <span className="text-emerald-800 font-medium">
-                              {q.model_answer || q.correct[0]}
-                            </span>
+                            <MathRenderer
+                              text={q.model_answer || q.correct[0]}
+                              as="span"
+                              className="text-emerald-800 font-medium"
+                            />
                           </div>
                         )}
 

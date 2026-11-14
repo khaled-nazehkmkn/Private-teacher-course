@@ -49,6 +49,7 @@ export interface Database {
           absence_total_limit?: number
           created_at?: string
         }
+        Relationships: []
       }
       groups: {
         Row: {
@@ -75,6 +76,7 @@ export interface Database {
           capacity?: number
           created_at?: string
         }
+        Relationships: []
       }
       group_sessions: {
         Row: {
@@ -98,6 +100,7 @@ export interface Database {
           start_time?: string
           end_time?: string
         }
+        Relationships: []
       }
       students: {
         Row: {
@@ -130,6 +133,7 @@ export interface Database {
           access_code?: string
           created_at?: string
         }
+        Relationships: []
       }
       session_occurrences: {
         Row: {
@@ -159,6 +163,7 @@ export interface Database {
           end_time?: string
           status?: 'held' | 'cancelled'
         }
+        Relationships: []
       }
       attendance: {
         Row: {
@@ -188,6 +193,7 @@ export interface Database {
           makeup_of?: string | null
           note?: string | null
         }
+        Relationships: []
       }
       makeup_requests: {
         Row: {
@@ -217,6 +223,7 @@ export interface Database {
           status?: 'pending' | 'approved' | 'rejected'
           created_at?: string
         }
+        Relationships: []
       }
       questions: {
         Row: {
@@ -231,6 +238,8 @@ export interface Database {
           topic: string | null
           grade: string | null
           difficulty: string | null
+          lesson: string | null
+          model_answer: string | null
           created_at: string
         }
         Insert: {
@@ -245,6 +254,8 @@ export interface Database {
           topic?: string | null
           grade?: string | null
           difficulty?: string | null
+          lesson?: string | null
+          model_answer?: string | null
           created_at?: string
         }
         Update: {
@@ -259,8 +270,11 @@ export interface Database {
           topic?: string | null
           grade?: string | null
           difficulty?: string | null
+          lesson?: string | null
+          model_answer?: string | null
           created_at?: string
         }
+        Relationships: []
       }
       exams: {
         Row: {
@@ -305,6 +319,7 @@ export interface Database {
           public_token?: string
           created_at?: string
         }
+        Relationships: []
       }
       exam_questions: {
         Row: {
@@ -325,6 +340,7 @@ export interface Database {
           position?: number
           marks_override?: number | null
         }
+        Relationships: []
       }
       submissions: {
         Row: {
@@ -357,6 +373,7 @@ export interface Database {
           score?: number | null
           max_score?: number | null
         }
+        Relationships: []
       }
       answers: {
         Row: {
@@ -380,6 +397,7 @@ export interface Database {
           is_correct?: boolean | null
           marks_awarded?: number | null
         }
+        Relationships: []
       }
       message_log: {
         Row: {
@@ -406,6 +424,7 @@ export interface Database {
           body?: string
           created_at?: string
         }
+        Relationships: []
       }
     }
     Views: {
@@ -416,7 +435,17 @@ export interface Database {
           session_date: string
           occurrence_id: string
         }
+        Relationships: []
       }
+    }
+    Functions: {
+      [_ in never]: never
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
     }
   }
 }
