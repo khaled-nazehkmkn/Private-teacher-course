@@ -108,6 +108,7 @@ export interface Database {
           teacher_id: string
           group_id: string | null
           full_name: string
+          phone: string | null
           parent_phone: string
           grade: string
           access_code: string
@@ -118,6 +119,7 @@ export interface Database {
           teacher_id: string
           group_id?: string | null
           full_name: string
+          phone?: string | null
           parent_phone: string
           grade: string
           access_code: string
@@ -128,6 +130,7 @@ export interface Database {
           teacher_id?: string
           group_id?: string | null
           full_name?: string
+          phone?: string | null
           parent_phone?: string
           grade?: string
           access_code?: string

@@ -216,10 +216,19 @@ export default function TeacherAppPage() {
         }
 
         // Fetch Students
-        const { data: studentsData } = await supabase
+        let { data: studentsData, error: stErr } = await supabase
           .from('students')
-          .select('id, full_name, parent_phone, grade, group_id, access_code')
+          .select('id, full_name, phone, parent_phone, grade, group_id, access_code')
           .order('full_name', { ascending: true })
+
+        if (stErr && (stErr.code === 'PGRST204' || stErr.message?.includes('phone'))) {
+          console.warn('[Students] Phone column not found in schema cache, falling back to select without phone')
+          const fallback = await supabase
+            .from('students')
+            .select('id, full_name, parent_phone, grade, group_id, access_code')
+            .order('full_name', { ascending: true })
+          studentsData = fallback.data as any
+        }
 
         if (studentsData) {
           setStudents(studentsData as StudentItem[])
@@ -670,14 +679,22 @@ export default function TeacherAppPage() {
     } = await supabase.auth.getUser()
 
     if (user) {
-      await supabase.from('students').insert({
+      const record: any = {
         teacher_id: user.id,
         group_id: studentData.group_id,
         full_name: studentData.full_name,
+        phone: studentData.phone || null,
         parent_phone: studentData.parent_phone,
         grade: studentData.grade,
         access_code: studentData.access_code,
-      })
+      }
+
+      let { error } = await supabase.from('students').insert(record)
+      if (error && (error.code === 'PGRST204' || error.message?.includes('phone'))) {
+        console.warn('[AddStudent] Phone column not found in schema cache, inserting without phone')
+        delete record.phone
+        await supabase.from('students').insert(record)
+      }
       await loadData()
       return
     }
@@ -697,16 +714,22 @@ export default function TeacherAppPage() {
     } = await supabase.auth.getUser()
 
     if (user) {
-      await supabase.from('students').insert(
-        list.map((s) => ({
-          teacher_id: user.id,
-          group_id: s.group_id,
-          full_name: s.full_name,
-          parent_phone: s.parent_phone,
-          grade: s.grade,
-          access_code: s.access_code,
-        }))
-      )
+      const records = list.map((s) => ({
+        teacher_id: user.id,
+        group_id: s.group_id,
+        full_name: s.full_name,
+        phone: s.phone || null,
+        parent_phone: s.parent_phone,
+        grade: s.grade,
+        access_code: s.access_code,
+      }))
+
+      let { error } = await supabase.from('students').insert(records)
+      if (error && (error.code === 'PGRST204' || error.message?.includes('phone'))) {
+        console.warn('[BatchImportStudents] Phone column not found in schema cache, retrying without phone')
+        const fallbackRecords = records.map(({ phone, ...rest }) => rest)
+        await supabase.from('students').insert(fallbackRecords)
+      }
       await loadData()
       return
     }

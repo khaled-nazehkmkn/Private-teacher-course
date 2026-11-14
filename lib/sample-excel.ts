@@ -82,3 +82,73 @@ export async function downloadSampleQuestionExcel(): Promise<void> {
 
   XLSX.writeFile(workbook, 'نموذج_بنك_الأسئلة_المثالي.xlsx')
 }
+
+
+/**
+ * Utility to generate and trigger download of a sample Students Excel sheet (.xlsx)
+ * Supports columns: اسم الطالب, رقم هاتف الطالب, رقم هاتف ولي الأمر, المجموعة, الصف
+ */
+export async function downloadSampleStudentExcel(
+  existingGroups?: { name: string; grade: string }[]
+): Promise<void> {
+  const XLSX = await import('xlsx')
+
+  const group1 = existingGroups?.[0]?.name || 'مجموعة السبت والثلاثاء ٥م'
+  const grade1 = existingGroups?.[0]?.grade || 'الصف الأول الثانوي'
+  const group2 = existingGroups?.[1]?.name || 'مجموعة الأحد والأربعاء ٦م'
+  const grade2 = existingGroups?.[1]?.grade || 'الصف الثاني الثانوي'
+
+  const sampleData = [
+    {
+      'اسم الطالب': 'يوسف أحمد محمد علي',
+      'رقم هاتف الطالب': '01012345678',
+      'رقم هاتف ولي الأمر': '01198765432',
+      'المجموعة': group1,
+      'الصف': grade1,
+    },
+    {
+      'اسم الطالب': 'مريم محمود إبراهيم حسن',
+      'رقم هاتف الطالب': '01234567890',
+      'رقم هاتف ولي الأمر': '01055566677',
+      'المجموعة': group1,
+      'الصف': grade1,
+    },
+    {
+      'اسم الطالب': 'عمر خالد حسن مصطفى',
+      'رقم هاتف الطالب': '01511223344',
+      'رقم هاتف ولي الأمر': '01288990011',
+      'المجموعة': group2,
+      'الصف': grade2,
+    },
+    {
+      'اسم الطالب': 'سارة طارق عبد الرحمن',
+      'رقم هاتف الطالب': '01122334455',
+      'رقم هاتف ولي الأمر': '01033445566',
+      'المجموعة': group2,
+      'الصف': grade2,
+    },
+    {
+      'اسم الطالب': 'زياد سامح كمال الدين',
+      'رقم هاتف الطالب': '01099887766',
+      'رقم هاتف ولي الأمر': '01233221100',
+      'المجموعة': group1,
+      'الصف': grade1,
+    },
+  ]
+
+  const worksheet = XLSX.utils.json_to_sheet(sampleData)
+
+  // Configure column widths for readability in Excel
+  worksheet['!cols'] = [
+    { wch: 30 }, // اسم الطالب
+    { wch: 20 }, // رقم هاتف الطالب
+    { wch: 20 }, // رقم هاتف ولي الأمر
+    { wch: 28 }, // المجموعة
+    { wch: 22 }, // الصف
+  ]
+
+  const workbook = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'قائمة الطلاب')
+
+  XLSX.writeFile(workbook, 'نموذج_إضافة_الطلاب_المثالي.xlsx')
+}
