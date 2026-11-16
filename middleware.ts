@@ -14,6 +14,7 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith('/exam') ||
     pathname.startsWith('/api/exam') ||
     pathname.startsWith('/api/ping') ||
+    pathname.startsWith('/api/version') ||
     pathname.startsWith('/_next') ||
     pathname.startsWith('/favicon.ico') ||
     pathname.match(/\.(png|jpg|jpeg|svg|webp|css|js)$/)

@@ -94,6 +94,14 @@ export default function StudentExamPage({
   latestAnswersRef.current = selectedAnswers
   latestPaperPhotosRef.current = paperPhotos
 
+  // Prevent auto-refresh from interrupting a student during an active exam session
+  useEffect(() => {
+    window.__ACTIVE_EXAM_SESSION__ = Boolean(submissionId && !isSubmitted)
+    return () => {
+      window.__ACTIVE_EXAM_SESSION__ = false
+    }
+  }, [submissionId, isSubmitted])
+
   // Fetch Exam Metadata
   useEffect(() => {
     async function loadMeta() {

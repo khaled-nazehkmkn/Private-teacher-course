@@ -1,6 +1,7 @@
 import { Analytics } from '@vercel/analytics/next'
 import { Cairo } from 'next/font/google'
 import type { Metadata, Viewport } from 'next'
+import { AppVersionChecker } from '@/components/AppVersionChecker'
 import './globals.css'
 import 'katex/dist/katex.min.css'
 
@@ -51,6 +52,7 @@ export default function RootLayout({
   return (
     <html lang="ar" dir="rtl" className="h-full">
       <body className={`${cairo.variable} min-h-full font-sans antialiased text-[#17263b] selection:bg-[#1d5ca8] selection:text-white`}>
+        <AppVersionChecker />
         {children}
         {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>
