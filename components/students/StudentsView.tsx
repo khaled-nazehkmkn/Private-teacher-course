@@ -18,6 +18,8 @@ import {
   AlertTriangle,
   CheckCircle2,
   Download,
+  Edit2,
+  RefreshCw,
 } from 'lucide-react'
 import { Modal } from '@/components/ui/modal'
 import { generateAccessCode } from '@/lib/access-code'
@@ -41,6 +43,10 @@ interface Props {
   students: StudentItem[]
   groups: GroupItem[]
   onAddStudent: (student: Omit<StudentItem, 'id'>) => Promise<void>
+  onUpdateStudent?: (
+    studentId: string,
+    updatedData: Omit<StudentItem, 'id' | 'group_name'>
+  ) => Promise<void>
   onBatchImport: (studentsList: Omit<StudentItem, 'id'>[]) => Promise<void>
   onMoveStudent: (studentId: string, newGroupId: string) => Promise<void>
   onDeleteStudent: (studentId: string) => Promise<void>
@@ -53,6 +59,7 @@ export function StudentsView({
   students,
   groups,
   onAddStudent,
+  onUpdateStudent,
   onBatchImport,
   onMoveStudent,
   onDeleteStudent,
@@ -81,6 +88,18 @@ export function StudentsView({
   const [groupId, setGroupId] = useState(groups[0]?.id || '')
   const [accessCode, setAccessCode] = useState(generateAccessCode(5))
   const [loadingAdd, setLoadingAdd] = useState(false)
+
+  // Edit modal state
+  const [editModalOpen, setEditModalOpen] = useState(false)
+  const [editingStudent, setEditingStudent] = useState<StudentItem | null>(null)
+  const [editFullName, setEditFullName] = useState('')
+  const [editParentPhone, setEditParentPhone] = useState('')
+  const [editStudentPhone, setEditStudentPhone] = useState('')
+  const [editGroupId, setEditGroupId] = useState('')
+  const [editGrade, setEditGrade] = useState('')
+  const [editAccessCode, setEditAccessCode] = useState('')
+  const [loadingEdit, setLoadingEdit] = useState(false)
+  const [editError, setEditError] = useState<string | null>(null)
 
   // Move modal state
   const [moveModalOpen, setMoveModalOpen] = useState(false)
@@ -122,6 +141,49 @@ export function StudentsView({
     }
   }
 
+  // Open Edit Student modal
+  const openEditModal = (st: StudentItem) => {
+    setEditingStudent(st)
+    setEditFullName(st.full_name)
+    setEditParentPhone(st.parent_phone)
+    setEditStudentPhone(st.phone || '')
+    setEditGroupId(st.group_id || '')
+    setEditGrade(st.grade)
+    setEditAccessCode(st.access_code)
+    setEditError(null)
+    setEditModalOpen(true)
+  }
+
+  // Submit Edit Student
+  const handleEditSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editingStudent || !onUpdateStudent) return
+    if (!editFullName.trim() || !editParentPhone.trim() || !editAccessCode.trim()) {
+      setEditError('يرجى إدخال اسم الطالب وهاتف ولي الأمر وكود الدخول')
+      return
+    }
+
+    setEditError(null)
+    setLoadingEdit(true)
+    try {
+      await onUpdateStudent(editingStudent.id, {
+        full_name: editFullName.trim(),
+        parent_phone: editParentPhone.trim(),
+        phone: editStudentPhone.trim() || null,
+        grade: editGrade.trim() || 'الصف الأول الثانوي',
+        group_id: editGroupId || null,
+        access_code: editAccessCode.trim(),
+      })
+      setEditModalOpen(false)
+      setEditingStudent(null)
+    } catch (err: any) {
+      console.error(err)
+      setEditError(err?.message || 'فشل تحديث بيانات الطالب')
+    } finally {
+      setLoadingEdit(false)
+    }
+  }
+
   // Submit Single Student
   const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -135,16 +197,16 @@ export function StudentsView({
         phone: studentPhone.trim() || null,
         grade,
         group_id: groupId || null,
-        access_code: accessCode,
+        access_code: accessCode.trim(),
       })
       setFullName('')
       setParentPhone('')
       setStudentPhone('')
       setAccessCode(generateAccessCode(5))
       setAddModalOpen(false)
-    } catch (err) {
+    } catch (err: any) {
       console.error(err)
-      alert('فشل إضافة الطالب')
+      alert(err?.message || 'فشل إضافة الطالب')
     } finally {
       setLoadingAdd(false)
     }
@@ -383,7 +445,10 @@ export function StudentsView({
 
       {/* MOBILE-FIRST CARD VIEW (Visible on phones < 768px) */}
       <div className="grid gap-2.5 sm:hidden">
-        {filteredStudents.map((st) => (
+        {filteredStudents.map((st) => {
+          const resolvedGroupName =
+            st.group_name || groups.find((g) => g.id === st.group_id)?.name
+          return (
           <div
             key={st.id}
             className="rounded-2xl border border-slate-200 bg-white p-3.5 shadow-xs"
@@ -395,9 +460,9 @@ export function StudentsView({
                   <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-600">
                     {st.grade}
                   </span>
-                  {st.group_name ? (
+                  {resolvedGroupName ? (
                     <span className="rounded-md bg-blue-50 px-2 py-0.5 text-[11px] font-bold text-[#1d5ca8]">
-                      {st.group_name}
+                      {resolvedGroupName}
                     </span>
                   ) : (
                     <span className="rounded-md bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-800">
@@ -464,6 +529,18 @@ export function StudentsView({
                       تسكين
                     </button>
                   )}
+                  {onUpdateStudent && (
+                    <button
+                      type="button"
+                      onClick={() => openEditModal(st)}
+                      disabled={!teacherStatus.isActive}
+                      className="rounded-lg p-1.5 text-slate-500 hover:bg-amber-50 hover:text-amber-600 disabled:opacity-30"
+                      aria-label="تعديل"
+                      title="تعديل بيانات الطالب"
+                    >
+                      <Edit2 className="size-4" />
+                    </button>
+                  )}
                   <button
                     onClick={() => {
                       setSelectedStudentForMove(st)
@@ -492,7 +569,8 @@ export function StudentsView({
               </div>
             </div>
           </div>
-        ))}
+          )
+        })}
 
         {filteredStudents.length === 0 && (
           <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center text-xs text-slate-400">
@@ -517,14 +595,17 @@ export function StudentsView({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredStudents.map((st) => (
+              {filteredStudents.map((st) => {
+                const resolvedGroupName =
+                  st.group_name || groups.find((g) => g.id === st.group_id)?.name
+                return (
                 <tr key={st.id} className="hover:bg-slate-50/80 transition">
                   <td className="p-3.5 font-bold text-slate-800">{st.full_name}</td>
                   <td className="p-3.5 text-slate-600">{st.grade}</td>
                   <td className="p-3.5">
-                    {st.group_name ? (
+                    {resolvedGroupName ? (
                       <span className="rounded-lg bg-blue-50 px-2 py-1 font-bold text-[#1d5ca8]">
-                        {st.group_name}
+                        {resolvedGroupName}
                       </span>
                     ) : (
                       <div className="flex items-center gap-2">
@@ -578,6 +659,18 @@ export function StudentsView({
                   </td>
                   <td className="p-3.5">
                     <div className="flex items-center justify-center gap-1.5">
+                      {onUpdateStudent && (
+                        <button
+                          type="button"
+                          onClick={() => openEditModal(st)}
+                          disabled={!teacherStatus.isActive}
+                          className="rounded-lg p-1.5 text-slate-500 hover:bg-amber-50 hover:text-amber-600 transition disabled:opacity-30"
+                          title="تعديل بيانات الطالب"
+                        >
+                          <Edit2 className="size-4" />
+                        </button>
+                      )}
+
                       <button
                         onClick={() => {
                           setSelectedStudentForMove(st)
@@ -606,7 +699,8 @@ export function StudentsView({
                     </div>
                   </td>
                 </tr>
-              ))}
+                )
+              })}
 
               {filteredStudents.length === 0 && (
                 <tr>
@@ -714,6 +808,148 @@ export function StudentsView({
             >
               {loadingAdd && <Loader2 className="size-3.5 animate-spin" />}
               حفظ الطالب
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Edit Student Modal */}
+      <Modal
+        isOpen={editModalOpen}
+        onClose={() => {
+          setEditModalOpen(false)
+          setEditingStudent(null)
+          setEditError(null)
+        }}
+        title={`تعديل بيانات الطالب: ${editingStudent?.full_name || ''}`}
+      >
+        <form onSubmit={handleEditSubmit} className="space-y-4">
+          {editError && (
+            <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs font-bold text-rose-700">
+              <AlertCircle className="size-4 shrink-0" />
+              <span>{editError}</span>
+            </div>
+          )}
+
+          <div>
+            <label className="mb-1 block text-xs font-bold text-slate-700">اسم الطالب رباعي</label>
+            <input
+              type="text"
+              required
+              value={editFullName}
+              onChange={(e) => setEditFullName(e.target.value)}
+              placeholder="مثال: يوسف أحمد محمد علي"
+              className="w-full rounded-xl border border-slate-200 p-2.5 text-sm outline-hidden focus:border-[#1d5ca8]"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-700">
+                هاتف ولي الأمر <span className="text-rose-500">*</span>
+              </label>
+              <input
+                type="tel"
+                required
+                value={editParentPhone}
+                onChange={(e) => setEditParentPhone(e.target.value)}
+                placeholder="01012345678"
+                className="w-full rounded-xl border border-slate-200 p-2.5 text-sm outline-hidden focus:border-[#1d5ca8]"
+                dir="ltr"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-700">
+                رقم هاتف الطالب (اختياري)
+              </label>
+              <input
+                type="tel"
+                value={editStudentPhone}
+                onChange={(e) => setEditStudentPhone(e.target.value)}
+                placeholder="01234567890"
+                className="w-full rounded-xl border border-slate-200 p-2.5 text-sm outline-hidden focus:border-[#1d5ca8]"
+                dir="ltr"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-700">المجموعة الدراسية</label>
+              <select
+                value={editGroupId}
+                onChange={(e) => {
+                  const gId = e.target.value
+                  setEditGroupId(gId)
+                  const selected = groups.find((g) => g.id === gId)
+                  if (selected) setEditGrade(selected.grade)
+                }}
+                className="w-full rounded-xl border border-slate-200 p-2.5 text-sm outline-hidden focus:border-[#1d5ca8]"
+              >
+                <option value="">بدون مجموعة</option>
+                {groups.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.name} ({g.grade}) - {g.studentCount || 0}/{g.capacity} طالب
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-700">المرحلة الدراسية</label>
+              <input
+                type="text"
+                required
+                value={editGrade}
+                onChange={(e) => setEditGrade(e.target.value)}
+                placeholder="مثال: الصف الأول الثانوي"
+                className="w-full rounded-xl border border-slate-200 p-2.5 text-sm outline-hidden focus:border-[#1d5ca8]"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs font-bold text-slate-700">كود الدخول للاختبار</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                required
+                value={editAccessCode}
+                onChange={(e) => setEditAccessCode(e.target.value)}
+                className="flex-1 rounded-xl border border-slate-200 bg-slate-50 p-2.5 font-mono text-sm font-bold text-center outline-hidden focus:border-[#1d5ca8] focus:bg-white"
+              />
+              <button
+                type="button"
+                onClick={() => setEditAccessCode(generateAccessCode(5))}
+                className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50 shrink-0"
+                title="توليد كود عشوائي جديد"
+              >
+                <RefreshCw className="size-3.5 text-[#1d5ca8]" />
+                <span>توليد كود</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-5 flex justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={() => {
+                setEditModalOpen(false)
+                setEditingStudent(null)
+                setEditError(null)
+              }}
+              className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50"
+            >
+              إلغاء
+            </button>
+            <button
+              type="submit"
+              disabled={loadingEdit}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-[#1d5ca8] px-5 py-2 text-xs font-bold text-white shadow-xs hover:bg-[#164e93] disabled:opacity-50"
+            >
+              {loadingEdit && <Loader2 className="size-3.5 animate-spin" />}
+              حفظ التعديلات
             </button>
           </div>
         </form>

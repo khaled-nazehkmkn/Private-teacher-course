@@ -355,6 +355,7 @@ export interface Database {
           submitted_at: string | null
           score: number | null
           max_score: number | null
+          termination_reason: string | null
         }
         Insert: {
           id?: string
@@ -365,6 +366,7 @@ export interface Database {
           submitted_at?: string | null
           score?: number | null
           max_score?: number | null
+          termination_reason?: string | null
         }
         Update: {
           id?: string
@@ -375,6 +377,7 @@ export interface Database {
           submitted_at?: string | null
           score?: number | null
           max_score?: number | null
+          termination_reason?: string | null
         }
         Relationships: []
       }

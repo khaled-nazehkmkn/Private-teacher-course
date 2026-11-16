@@ -75,7 +75,7 @@ export async function POST(
     // Successful code verification, reset rate limit
     resetAttempts(clientIp)
 
-    // 4. Check for previous submission (one attempt only constraint)
+    // 4. Check for previous submission / entry (one attempt only constraint; only teacher can delete record)
     const { data: existingSubmission } = await adminClient
       .from('submissions')
       .select('id, submitted_at, started_at')
@@ -83,9 +83,13 @@ export async function POST(
       .eq('student_id', student.id)
       .maybeSingle()
 
-    if (existingSubmission?.submitted_at) {
+    if (existingSubmission) {
       return NextResponse.json(
-        { error: 'لقد قمت بتسليم هذا الاختبار مسبقاً، ولا يمكن إعادة المحاولة.' },
+        {
+          error: existingSubmission.submitted_at
+            ? 'تم إنهاء أو تسليم هذا الاختبار مسبقاً، ولا يمكن إعادة الدخول إلا بعد حذف سجل المحاولة من قِبل المعلم.'
+            : 'تم تسجيل دخولك لهذا الاختبار مسبقاً وأُغلقت الجلسة. لا يمكن إعادة الدخول إلا بعد حذف سجل المحاولة من قِبل المعلم.',
+        },
         { status: 403 }
       )
     }
@@ -102,28 +106,32 @@ export async function POST(
       return NextResponse.json({ error: sessionCheck.reason }, { status: 403 })
     }
 
-    // 5. Create or retrieve active submission
-    let submissionId = existingSubmission?.id
-    let startedAt = existingSubmission?.started_at
+    // 5. Create new submission
+    const { data: newSub, error: createSubError } = await adminClient
+      .from('submissions')
+      .insert({
+        exam_id: exam.id,
+        teacher_id: exam.teacher_id,
+        student_id: student.id,
+      })
+      .select('id, started_at')
+      .single()
 
-    if (!submissionId) {
-      const { data: newSub, error: createSubError } = await adminClient
-        .from('submissions')
-        .insert({
-          exam_id: exam.id,
-          teacher_id: exam.teacher_id,
-          student_id: student.id,
-        })
-        .select('id, started_at')
-        .single()
-
-      if (createSubError || !newSub) {
-        console.error('[Exam Start] Failed to create submission:', createSubError)
-        return NextResponse.json({ error: 'فشل بدء جلسة الاختبار' }, { status: 500 })
+    if (createSubError || !newSub) {
+      if (createSubError?.code === '23505') {
+        return NextResponse.json(
+          {
+            error:
+              'تم تسجيل دخولك لهذا الاختبار مسبقاً، ولا يمكن إعادة الدخول إلا بعد حذف سجل المحاولة من قِبل المعلم.',
+          },
+          { status: 403 }
+        )
       }
-      submissionId = newSub.id
-      startedAt = newSub.started_at
+      console.error('[Exam Start] Failed to create submission:', createSubError)
+      return NextResponse.json({ error: 'فشل بدء جلسة الاختبار' }, { status: 500 })
     }
+    const submissionId = newSub.id
+    const startedAt = newSub.started_at
 
     // 6. Fetch questions for this exam
     const { data: examQuestions, error: eqError } = await adminClient
@@ -146,18 +154,6 @@ export async function POST(
     if (eqError || !examQuestions) {
       console.error('[Exam Start] Error fetching exam questions:', eqError)
       return NextResponse.json({ error: 'تعذر جلب أسئلة الاختبار' }, { status: 500 })
-    }
-
-    // Check if previous session time ran out
-    if (existingSubmission?.started_at) {
-      const elapsedSeconds = Math.floor((Date.now() - new Date(existingSubmission.started_at).getTime()) / 1000)
-      const remainingSeconds = exam.duration_min * 60 - elapsedSeconds
-      if (remainingSeconds <= 0) {
-        return NextResponse.json(
-          { error: 'انتهت مدة الاختبار المحددة لك مسبقاً، ولا يمكن إعادة الدخول.' },
-          { status: 403 }
-        )
-      }
     }
 
     // Fetch any previously autosaved answers for this submission

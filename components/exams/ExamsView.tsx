@@ -61,7 +61,9 @@ export interface ExamSubmissionDetail {
   parent_phone: string
   score: number
   max_score: number
-  submitted_at: string
+  started_at?: string
+  submitted_at: string | null
+  termination_reason?: string | null
   answers: Array<{
     question_id: string
     is_correct: boolean
@@ -88,6 +90,7 @@ interface Props {
   onToggleResultsRelease: (examId: string, currentReleased: boolean) => Promise<void>
   onDeleteExam: (examId: string) => Promise<void>
   onFetchExamSubmissions: (examId: string) => Promise<ExamSubmissionDetail[]>
+  onDeleteSubmission?: (submissionId: string) => Promise<void>
   onLogWhatsAppResult: (studentId: string, message: string) => Promise<void>
   teacherStatus: TeacherStatus
 }
@@ -102,6 +105,7 @@ export function ExamsView({
   onToggleResultsRelease,
   onDeleteExam,
   onFetchExamSubmissions,
+  onDeleteSubmission,
   onLogWhatsAppResult,
   teacherStatus,
 }: Props) {
@@ -115,6 +119,7 @@ export function ExamsView({
   const [selectedExamForResults, setSelectedExamForResults] = useState<ExamItem | null>(null)
   const [submissionsList, setSubmissionsList] = useState<ExamSubmissionDetail[]>([])
   const [loadingSubmissions, setLoadingSubmissions] = useState(false)
+  const [deletingSubmissionId, setDeletingSubmissionId] = useState<string | null>(null)
 
   // Create Form State
   const [title, setTitle] = useState('')
@@ -254,6 +259,25 @@ export function ExamsView({
       console.error('Error fetching submissions:', e)
     } finally {
       setLoadingSubmissions(false)
+    }
+  }
+
+  const handleDeleteStudentSubmission = async (sub: ExamSubmissionDetail) => {
+    if (!onDeleteSubmission) return
+    const confirmed = confirm(
+      `هل أنت متأكد من حذف سجل الطالب "${sub.student_name}" في هذا الاختبار؟\nسيتم مسح إجاباته ودرجته الحالية وسيتمكن من دخول الاختبار مرة أخرى بكوده.`
+    )
+    if (!confirmed) return
+
+    setDeletingSubmissionId(sub.id)
+    try {
+      await onDeleteSubmission(sub.id)
+      setSubmissionsList((prev) => prev.filter((item) => item.id !== sub.id))
+    } catch (err: any) {
+      console.error('Error deleting submission:', err)
+      alert(err?.message || 'فشل حذف سجل الطالب')
+    } finally {
+      setDeletingSubmissionId(null)
     }
   }
 
@@ -921,48 +945,81 @@ export function ExamsView({
             </div>
           ) : (
             <div className="space-y-4">
-              <h4 className="text-xs font-bold text-slate-700">قائمة درجات الطلاب:</h4>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <h4 className="text-xs font-bold text-slate-700">قائمة سجلات ودرجات الطلاب:</h4>
+                <p className="text-[11px] text-slate-400">
+                  يمكنك حذف سجل أي طالب للسماح له بإعادة دخول الاختبار بكوده.
+                </p>
+              </div>
               <div className="overflow-x-auto rounded-xl border border-slate-200">
                 <table className="w-full text-right text-xs">
                   <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold">
                     <tr>
                       <th className="p-3">اسم الطالب</th>
+                      <th className="p-3">الحالة</th>
                       <th className="p-3">الدرجة</th>
                       <th className="p-3">النسبة</th>
-                      <th className="p-3">وقت التسليم</th>
+                      <th className="p-3">الوقت</th>
                       <th className="p-3 text-center">إجراءات والتصحيح</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {submissionsList.map((sub) => {
                       const perc = Math.round((sub.score / (sub.max_score || 1)) * 100)
+                      const isLeftSession = sub.termination_reason === 'left_session'
+                      const isIncomplete = !sub.submitted_at
+                      const timeLabel = sub.submitted_at
+                        ? new Date(sub.submitted_at).toLocaleTimeString('ar-EG', {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })
+                        : sub.started_at
+                        ? `بدأ ${new Date(sub.started_at).toLocaleTimeString('ar-EG', {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}`
+                        : '—'
                       return (
                         <tr key={sub.id} className="hover:bg-slate-50/80">
                           <td className="p-3 font-bold text-slate-800">{sub.student_name}</td>
+                          <td className="p-3">
+                            {isLeftSession ? (
+                              <span className="inline-flex items-center rounded-full bg-rose-50 border border-rose-200 px-2 py-0.5 text-[10px] font-bold text-rose-700">
+                                انتهى لمغادرة الجلسة
+                              </span>
+                            ) : isIncomplete ? (
+                              <span className="inline-flex items-center rounded-full bg-amber-50 border border-amber-200 px-2 py-0.5 text-[10px] font-bold text-amber-700">
+                                جلسة مفتوحة / لم تكتمل
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center rounded-full bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+                                تم التسليم
+                              </span>
+                            )}
+                          </td>
                           <td className="p-3 font-bold">
-                            {sub.score} / {sub.max_score}
+                            {isIncomplete ? '—' : `${sub.score} / ${sub.max_score}`}
                           </td>
                           <td className="p-3 font-semibold">
-                            <span
-                              className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${
-                                perc >= 85
-                                  ? 'bg-emerald-50 text-emerald-700'
-                                  : perc >= 60
-                                  ? 'bg-blue-50 text-blue-700'
-                                  : 'bg-rose-50 text-rose-700'
-                              }`}
-                            >
-                              {perc}%
-                            </span>
+                            {isIncomplete ? (
+                              <span className="text-slate-400">—</span>
+                            ) : (
+                              <span
+                                className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${
+                                  perc >= 85
+                                    ? 'bg-emerald-50 text-emerald-700'
+                                    : perc >= 60
+                                    ? 'bg-blue-50 text-blue-700'
+                                    : 'bg-rose-50 text-rose-700'
+                                }`}
+                              >
+                                {perc}%
+                              </span>
+                            )}
                           </td>
-                          <td className="p-3 text-slate-500">
-                            {new Date(sub.submitted_at).toLocaleTimeString('ar-EG', {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })}
-                          </td>
+                          <td className="p-3 text-slate-500">{timeLabel}</td>
                           <td className="p-3 text-center">
-                            <div className="flex items-center justify-center gap-1.5">
+                            <div className="flex flex-wrap items-center justify-center gap-1.5">
                               <button
                                 type="button"
                                 onClick={() => handleOpenGrading(sub)}
@@ -971,16 +1028,34 @@ export function ExamsView({
                                 <Edit3 className="size-3.5" />
                                 <span>مراجعة وتصحيح</span>
                               </button>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  handleSendResultWhatsApp(sub, selectedExamForResults?.title || '')
-                                }
-                                className="inline-flex items-center gap-1 rounded-xl bg-emerald-600 px-2.5 py-1.5 text-xs font-bold text-white hover:bg-emerald-700 shadow-xs"
-                              >
-                                <MessageCircle className="size-3.5" />
-                                <span>واتساب</span>
-                              </button>
+                              {!isIncomplete && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleSendResultWhatsApp(sub, selectedExamForResults?.title || '')
+                                  }
+                                  className="inline-flex items-center gap-1 rounded-xl bg-emerald-600 px-2.5 py-1.5 text-xs font-bold text-white hover:bg-emerald-700 shadow-xs"
+                                >
+                                  <MessageCircle className="size-3.5" />
+                                  <span>واتساب</span>
+                                </button>
+                              )}
+                              {onDeleteSubmission && (
+                                <button
+                                  type="button"
+                                  disabled={!teacherStatus.isActive || deletingSubmissionId === sub.id}
+                                  onClick={() => handleDeleteStudentSubmission(sub)}
+                                  className="inline-flex items-center gap-1 rounded-xl border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-xs font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-40 shadow-xs"
+                                  title="حذف سجل الطالب للسماح له بإعادة دخول الاختبار"
+                                >
+                                  {deletingSubmissionId === sub.id ? (
+                                    <Loader2 className="size-3.5 animate-spin" />
+                                  ) : (
+                                    <RotateCcw className="size-3.5" />
+                                  )}
+                                  <span>حذف السجل</span>
+                                </button>
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -989,8 +1064,8 @@ export function ExamsView({
 
                     {submissionsList.length === 0 && (
                       <tr>
-                        <td colSpan={5} className="p-6 text-center text-slate-400">
-                          لم يقم أي طالب بتسليم هذا الاختبار حتى الآن
+                        <td colSpan={6} className="p-6 text-center text-slate-400">
+                          لا توجد سجلات طلاب لهذا الاختبار حتى الآن
                         </td>
                       </tr>
                     )}

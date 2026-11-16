@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { getAdminClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
+import { releaseExamSession } from '@/lib/rate-limit'
+import { evaluateTeacherStatus } from '@/lib/teacher-status'
 
 export async function GET(
   request: Request,
@@ -98,6 +100,76 @@ export async function GET(
     })
   } catch (error) {
     console.error('[Get Submission Detail] Error:', error)
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'حدث خطأ غير متوقع' },
+      { status: 500 }
+    )
+  }
+}
+
+export async function DELETE(
+  request: Request,
+  props: { params: Promise<{ id: string }> }
+) {
+  const params = await props.params
+  try {
+    const supabaseUser = await createClient()
+    const {
+      data: { user },
+      error: authError,
+    } = await supabaseUser.auth.getUser()
+
+    if (authError || !user) {
+      return NextResponse.json({ error: 'غير مصرح لك' }, { status: 401 })
+    }
+
+    const adminClient = getAdminClient()
+
+    // Check teacher active status
+    const { data: teacherRow } = await adminClient
+      .from('teachers')
+      .select('is_admin, is_suspended, active_from, active_to')
+      .eq('id', user.id)
+      .single()
+
+    if (teacherRow && !evaluateTeacherStatus(teacherRow).isActive) {
+      return NextResponse.json(
+        { error: 'حسابك في وضع القراءة فقط، لا يمكنك حذف سجلات الاختبار' },
+        { status: 403 }
+      )
+    }
+
+    const submissionId = params.id
+
+    // Verify ownership and get exam_id + student_id to release active session lock
+    const { data: sub, error: fetchErr } = await adminClient
+      .from('submissions')
+      .select('id, exam_id, student_id')
+      .eq('id', submissionId)
+      .eq('teacher_id', user.id)
+      .single()
+
+    if (fetchErr || !sub) {
+      return NextResponse.json({ error: 'سجل الطالب غير موجود' }, { status: 404 })
+    }
+
+    const { error: deleteErr } = await adminClient
+      .from('submissions')
+      .delete()
+      .eq('id', submissionId)
+      .eq('teacher_id', user.id)
+
+    if (deleteErr) {
+      console.error('[Delete Submission] Error:', deleteErr)
+      return NextResponse.json({ error: 'فشل حذف سجل الطالب' }, { status: 500 })
+    }
+
+    // Also clear any in-memory single-device session lock
+    releaseExamSession(sub.exam_id, sub.student_id)
+
+    return NextResponse.json({ success: true })
+  } catch (error) {
+    console.error('[Delete Submission] Exception:', error)
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'حدث خطأ غير متوقع' },
       { status: 500 }

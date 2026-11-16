@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/browser'
 import { evaluateTeacherStatus, type TeacherStatus } from '@/lib/teacher-status'
 import { generateOccurrencesForWeeks } from '@/lib/occurrences'
+import { normalizeArabicDigits } from '@/lib/access-code'
 
 // UI Components
 import { Sidebar } from '@/components/Sidebar'
@@ -204,17 +205,6 @@ export default function TeacherAppPage() {
           `)
           .order('created_at', { ascending: false })
 
-        if (groupsData && groupsData.length > 0) {
-          const mappedGroups: GroupItem[] = groupsData.map((g: any) => ({
-            id: g.id,
-            name: g.name,
-            grade: g.grade,
-            capacity: g.capacity,
-            sessions: g.sessions || [],
-          }))
-          setGroups(mappedGroups)
-        }
-
         // Fetch Students
         let { data: studentsData, error: stErr } = await supabase
           .from('students')
@@ -230,8 +220,41 @@ export default function TeacherAppPage() {
           studentsData = fallback.data as any
         }
 
+        const groupNameMap = new Map<string, string>()
+        const groupCountMap = new Map<string, number>()
+
+        if (groupsData) {
+          groupsData.forEach((g: any) => {
+            groupNameMap.set(g.id, g.name)
+          })
+        }
+
         if (studentsData) {
-          setStudents(studentsData as StudentItem[])
+          studentsData.forEach((s: any) => {
+            if (s.group_id) {
+              groupCountMap.set(s.group_id, (groupCountMap.get(s.group_id) || 0) + 1)
+            }
+          })
+          setStudents(
+            studentsData.map((s: any) => ({
+              ...s,
+              group_name: s.group_id ? groupNameMap.get(s.group_id) : undefined,
+            })) as StudentItem[]
+          )
+        }
+
+        if (groupsData && groupsData.length > 0) {
+          const mappedGroups: GroupItem[] = groupsData.map((g: any) => ({
+            id: g.id,
+            name: g.name,
+            grade: g.grade,
+            capacity: g.capacity,
+            studentCount: groupCountMap.get(g.id) || 0,
+            sessions: g.sessions || [],
+          }))
+          setGroups(mappedGroups)
+        } else if (groupsData) {
+          setGroups([])
         }
 
         // Fetch Occurrences
@@ -678,22 +701,31 @@ export default function TeacherAppPage() {
       data: { user },
     } = await supabase.auth.getUser()
 
+    const normalizedCode = normalizeArabicDigits(studentData.access_code || '').trim()
+
     if (user) {
       const record: any = {
         teacher_id: user.id,
-        group_id: studentData.group_id,
+        group_id: studentData.group_id || null,
         full_name: studentData.full_name,
         phone: studentData.phone || null,
         parent_phone: studentData.parent_phone,
         grade: studentData.grade,
-        access_code: studentData.access_code,
+        access_code: normalizedCode,
       }
 
       let { error } = await supabase.from('students').insert(record)
       if (error && (error.code === 'PGRST204' || error.message?.includes('phone'))) {
         console.warn('[AddStudent] Phone column not found in schema cache, inserting without phone')
         delete record.phone
-        await supabase.from('students').insert(record)
+        const retry = await supabase.from('students').insert(record)
+        error = retry.error
+      }
+      if (error) {
+        if (error.code === '23505') {
+          throw new Error('كود الدخول مستخدم بالفعل لطالب آخر، يرجى اختيار كود مختلف')
+        }
+        throw new Error(error.message || 'فشل إضافة الطالب')
       }
       await loadData()
       return
@@ -703,8 +735,75 @@ export default function TeacherAppPage() {
     const grp = groups.find((g) => g.id === studentData.group_id)
     setStudents((prev) => [
       ...prev,
-      { id, ...studentData, group_name: grp?.name || undefined },
+      { id, ...studentData, access_code: normalizedCode, group_name: grp?.name || undefined },
     ])
+  }
+
+  const handleUpdateStudent = async (
+    studentId: string,
+    updatedData: Omit<StudentItem, 'id' | 'group_name'>
+  ) => {
+    const supabase = createClient()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    const normalizedCode = normalizeArabicDigits(updatedData.access_code || '').trim()
+    if (!normalizedCode) {
+      throw new Error('يرجى إدخال كود دخول صحيح للطالب')
+    }
+
+    if (user) {
+      const updatePayload: any = {
+        group_id: updatedData.group_id || null,
+        full_name: updatedData.full_name.trim(),
+        phone: updatedData.phone?.trim() || null,
+        parent_phone: updatedData.parent_phone.trim(),
+        grade: updatedData.grade.trim(),
+        access_code: normalizedCode,
+      }
+
+      let { error } = await supabase
+        .from('students')
+        .update(updatePayload)
+        .eq('id', studentId)
+        .eq('teacher_id', user.id)
+
+      if (error && (error.code === 'PGRST204' || error.message?.includes('phone'))) {
+        console.warn('[UpdateStudent] Phone column not found in schema cache, updating without phone')
+        delete updatePayload.phone
+        const retry = await supabase
+          .from('students')
+          .update(updatePayload)
+          .eq('id', studentId)
+          .eq('teacher_id', user.id)
+        error = retry.error
+      }
+
+      if (error) {
+        if (error.code === '23505') {
+          throw new Error('كود الدخول مستخدم بالفعل لطالب آخر، يرجى اختيار كود مختلف')
+        }
+        throw new Error(error.message || 'فشل تحديث بيانات الطالب')
+      }
+
+      await loadData()
+      return
+    }
+
+    const grp = groups.find((g) => g.id === updatedData.group_id)
+    setStudents((prev) =>
+      prev.map((s) =>
+        s.id === studentId
+          ? {
+              ...s,
+              ...updatedData,
+              access_code: normalizedCode,
+              group_name: grp?.name || undefined,
+            }
+          : s
+      )
+    )
   }
 
   const handleBatchImportStudents = async (list: Omit<StudentItem, 'id'>[]) => {
@@ -721,7 +820,7 @@ export default function TeacherAppPage() {
         phone: s.phone || null,
         parent_phone: s.parent_phone,
         grade: s.grade,
-        access_code: s.access_code,
+        access_code: normalizeArabicDigits(s.access_code || '').trim(),
       }))
 
       let { error } = await supabase.from('students').insert(records)
@@ -737,6 +836,7 @@ export default function TeacherAppPage() {
     const newItems: StudentItem[] = list.map((s, idx) => ({
       id: `st-import-${Date.now()}-${idx}`,
       ...s,
+      access_code: normalizeArabicDigits(s.access_code || '').trim(),
       group_name: groups.find((g) => g.id === s.group_id)?.name,
     }))
     setStudents((prev) => [...prev, ...newItems])
@@ -1250,32 +1350,73 @@ export default function TeacherAppPage() {
   }
 
   const handleFetchExamSubmissions = async (examId: string): Promise<ExamSubmissionDetail[]> => {
-    const supabase = createClient()
-    const { data: subsData } = await supabase
-      .from('submissions')
-      .select(`
-        id,
-        student_id,
-        score,
-        max_score,
-        submitted_at,
-        student:students(full_name, parent_phone),
-        answers:answers(question_id, is_correct, marks_awarded)
-      `)
-      .eq('exam_id', examId)
-      .not('submitted_at', 'is', null)
+    try {
+      const supabase = createClient()
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
 
-    if (subsData && subsData.length > 0) {
-      return subsData.map((s: any) => ({
-        id: s.id,
-        student_id: s.student_id,
-        student_name: s.student?.full_name || 'طالب',
-        parent_phone: s.student?.parent_phone || '',
-        score: Number(s.score || 0),
-        max_score: Number(s.max_score || 0),
-        submitted_at: s.submitted_at,
-        answers: s.answers || [],
-      }))
+      if (user) {
+        let { data: subsData, error } = await supabase
+          .from('submissions')
+          .select(`
+            id,
+            student_id,
+            score,
+            max_score,
+            started_at,
+            submitted_at,
+            termination_reason,
+            student:students(full_name, parent_phone),
+            answers:answers(question_id, is_correct, marks_awarded)
+          `)
+          .eq('exam_id', examId)
+          .order('started_at', { ascending: false })
+
+        if (
+          error &&
+          (error.code === 'PGRST204' || error.message?.includes('termination_reason'))
+        ) {
+          console.warn('[FetchSubmissions] termination_reason missing in schema cache, falling back')
+          const fallback = await supabase
+            .from('submissions')
+            .select(`
+              id,
+              student_id,
+              score,
+              max_score,
+              started_at,
+              submitted_at,
+              student:students(full_name, parent_phone),
+              answers:answers(question_id, is_correct, marks_awarded)
+            `)
+            .eq('exam_id', examId)
+            .order('started_at', { ascending: false })
+          subsData = fallback.data as any
+          error = fallback.error
+        }
+
+        if (error) {
+          console.error('[FetchSubmissions] Error:', error)
+          return []
+        }
+
+        return (subsData || []).map((s: any) => ({
+          id: s.id,
+          student_id: s.student_id,
+          student_name: s.student?.full_name || 'طالب',
+          parent_phone: s.student?.parent_phone || '',
+          score: Number(s.score || 0),
+          max_score: Number(s.max_score || 0),
+          started_at: s.started_at,
+          submitted_at: s.submitted_at,
+          termination_reason: s.termination_reason || null,
+          answers: s.answers || [],
+        }))
+      }
+    } catch (err) {
+      console.error('[FetchSubmissions] Exception:', err)
+      return []
     }
 
     // Mock submissions for testing if offline
@@ -1288,6 +1429,7 @@ export default function TeacherAppPage() {
         score: 18,
         max_score: 20,
         submitted_at: new Date().toISOString(),
+        termination_reason: null,
         answers: [],
       },
       {
@@ -1298,9 +1440,32 @@ export default function TeacherAppPage() {
         score: 14,
         max_score: 20,
         submitted_at: new Date().toISOString(),
+        termination_reason: 'left_session',
         answers: [],
       },
     ]
+  }
+
+  const handleDeleteExamSubmission = async (submissionId: string) => {
+    try {
+      const supabase = createClient()
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+
+      if (user) {
+        const res = await fetch(`/api/exam/submission/${submissionId}`, {
+          method: 'DELETE',
+        })
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          throw new Error(data?.error || 'فشل حذف سجل الطالب')
+        }
+      }
+    } catch (err: any) {
+      console.error('[DeleteExamSubmission] Error:', err)
+      throw err
+    }
   }
 
   // Make-up Handlers
@@ -1484,6 +1649,7 @@ export default function TeacherAppPage() {
               students={students}
               groups={groups}
               onAddStudent={handleAddStudent}
+              onUpdateStudent={handleUpdateStudent}
               onBatchImport={handleBatchImportStudents}
               onMoveStudent={handleMoveStudent}
               onDeleteStudent={handleDeleteStudent}
@@ -1565,6 +1731,7 @@ export default function TeacherAppPage() {
               onToggleResultsRelease={handleToggleResultsRelease}
               onDeleteExam={handleDeleteExam}
               onFetchExamSubmissions={handleFetchExamSubmissions}
+              onDeleteSubmission={handleDeleteExamSubmission}
               onLogWhatsAppResult={(sId, msg) => handleLogWhatsAppMessage(sId, msg, 'result')}
               teacherStatus={teacherStatus}
             />

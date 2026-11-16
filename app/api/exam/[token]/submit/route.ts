@@ -10,7 +10,7 @@ export async function POST(
   try {
     const { token } = params
     const body = await request.json()
-    const { submission_id, final_answers, paper_photos } = body
+    const { submission_id, final_answers, paper_photos, ended_by_leave } = body
 
     if (!submission_id) {
       return NextResponse.json({ error: 'معرّف الجلسة مطلوب' }, { status: 400 })
@@ -32,7 +32,7 @@ export async function POST(
     // 2. Fetch submission
     const { data: submission, error: subError } = await adminClient
       .from('submissions')
-      .select('id, submitted_at, student_id')
+      .select('id, submitted_at, student_id, score, max_score')
       .eq('id', submission_id)
       .eq('exam_id', exam.id)
       .single()
@@ -42,6 +42,16 @@ export async function POST(
     }
 
     if (submission.submitted_at) {
+      if (ended_by_leave) {
+        return NextResponse.json({
+          success: true,
+          already_submitted: true,
+          ended_by_leave: true,
+          results_released: exam.results_released,
+          score: exam.results_released ? submission.score : null,
+          max_score: exam.results_released ? submission.max_score : null,
+        })
+      }
       return NextResponse.json(
         { error: 'تم تسليم الاختبار بالفعل مسبقاً' },
         { status: 400 }
@@ -158,16 +168,37 @@ export async function POST(
 
     // 5. Finalize submission
     const submittedAt = new Date().toISOString()
-    const { data: subData } = await adminClient
+    const updatePayload: {
+      submitted_at: string
+      score: number
+      max_score: number
+      termination_reason?: string | null
+    } = {
+      submitted_at: submittedAt,
+      score: totalScore,
+      max_score: totalMaxScore,
+    }
+    if (ended_by_leave) {
+      updatePayload.termination_reason = 'left_session'
+    }
+
+    let { data: subData, error: updateErr } = await adminClient
       .from('submissions')
-      .update({
-        submitted_at: submittedAt,
-        score: totalScore,
-        max_score: totalMaxScore,
-      })
+      .update(updatePayload)
       .eq('id', submission_id)
       .select('student_id')
       .single()
+
+    if (updateErr && (updateErr.code === 'PGRST204' || updateErr.message?.includes('termination_reason'))) {
+      delete updatePayload.termination_reason
+      const fallback = await adminClient
+        .from('submissions')
+        .update(updatePayload)
+        .eq('id', submission_id)
+        .select('student_id')
+        .single()
+      subData = fallback.data
+    }
 
     if (subData?.student_id) {
       releaseExamSession(exam.id, subData.student_id)
@@ -177,6 +208,7 @@ export async function POST(
 
     return NextResponse.json({
       success: true,
+      ended_by_leave: Boolean(ended_by_leave),
       has_essay: hasEssayQuestions,
       results_released: exam.results_released,
       score: exam.results_released ? totalScore : null,

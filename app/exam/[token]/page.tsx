@@ -14,6 +14,8 @@ import {
   Camera,
   Plus,
   FileText,
+  ShieldAlert,
+  AlertTriangle,
 } from 'lucide-react'
 import { MathRenderer } from '@/components/ui/math-renderer'
 
@@ -67,7 +69,9 @@ export default function StudentExamPage({
 
   // Step 3: Submitted state
   const [isSubmitted, setIsSubmitted] = useState(false)
+  const [endedByLeave, setEndedByLeave] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [examActionError, setExamActionError] = useState<string | null>(null)
   const [resultData, setResultData] = useState<{
     results_released: boolean
     has_essay?: boolean
@@ -78,6 +82,17 @@ export default function StudentExamPage({
   const [zoomedImageUrl, setZoomedImageUrl] = useState<string | null>(null)
 
   const timerRef = useRef<NodeJS.Timeout | null>(null)
+  const submissionIdRef = useRef<string | null>(null)
+  const isSubmittedRef = useRef(false)
+  const hasEndedSessionRef = useRef(false)
+  const isPickingPaperPhotoRef = useRef(false)
+  const latestAnswersRef = useRef<Record<string, any>>({})
+  const latestPaperPhotosRef = useRef<string[]>([])
+
+  submissionIdRef.current = submissionId
+  isSubmittedRef.current = isSubmitted
+  latestAnswersRef.current = selectedAnswers
+  latestPaperPhotosRef.current = paperPhotos
 
   // Fetch Exam Metadata
   useEffect(() => {
@@ -121,6 +136,124 @@ export default function StudentExamPage({
     }
   }, [submissionId, isSubmitted, secondsRemaining])
 
+  // Anti-cheat: End exam session immediately if student leaves page, switches tab, or switches to another app on mobile
+  useEffect(() => {
+    if (!submissionId || isSubmitted) return
+
+    let blurTimeout: ReturnType<typeof setTimeout> | null = null
+    let photoResetTimeout: ReturnType<typeof setTimeout> | null = null
+    let armedForBlur = false
+
+    const armTimer = setTimeout(() => {
+      armedForBlur = true
+    }, 800)
+
+    const terminateSessionOnLeave = () => {
+      if (
+        hasEndedSessionRef.current ||
+        isSubmittedRef.current ||
+        !submissionIdRef.current ||
+        isPickingPaperPhotoRef.current
+      ) {
+        return
+      }
+
+      hasEndedSessionRef.current = true
+      isSubmittedRef.current = true
+      setEndedByLeave(true)
+      setIsSubmitted(true)
+
+      const payload = {
+        submission_id: submissionIdRef.current,
+        final_answers: latestAnswersRef.current,
+        paper_photos: latestPaperPhotosRef.current,
+        ended_by_leave: true,
+      }
+      const bodyStr = JSON.stringify(payload)
+
+      try {
+        fetch(`/api/exam/${token}/submit`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: bodyStr,
+          keepalive: true,
+        })
+          .then((res) => (res.ok ? res.json() : null))
+          .then((data) => {
+            if (data) setResultData(data)
+          })
+          .catch(() => {
+            if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
+              navigator.sendBeacon(
+                `/api/exam/${token}/submit`,
+                new Blob([bodyStr], { type: 'application/json' })
+              )
+            }
+          })
+      } catch {
+        if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
+          navigator.sendBeacon(
+            `/api/exam/${token}/submit`,
+            new Blob([bodyStr], { type: 'application/json' })
+          )
+        }
+      }
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        terminateSessionOnLeave()
+      } else if (document.visibilityState === 'visible' && isPickingPaperPhotoRef.current) {
+        if (photoResetTimeout) clearTimeout(photoResetTimeout)
+        photoResetTimeout = setTimeout(() => {
+          isPickingPaperPhotoRef.current = false
+        }, 700)
+      }
+    }
+
+    const handlePageHide = () => {
+      terminateSessionOnLeave()
+    }
+
+    const handleWindowBlur = () => {
+      if (!armedForBlur || isPickingPaperPhotoRef.current) return
+      if (blurTimeout) clearTimeout(blurTimeout)
+      blurTimeout = setTimeout(() => {
+        if (!document.hasFocus() && !isPickingPaperPhotoRef.current) {
+          terminateSessionOnLeave()
+        }
+      }, 250)
+    }
+
+    const handleWindowFocus = () => {
+      if (blurTimeout) {
+        clearTimeout(blurTimeout)
+        blurTimeout = null
+      }
+      if (isPickingPaperPhotoRef.current) {
+        if (photoResetTimeout) clearTimeout(photoResetTimeout)
+        photoResetTimeout = setTimeout(() => {
+          isPickingPaperPhotoRef.current = false
+        }, 700)
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    window.addEventListener('pagehide', handlePageHide)
+    window.addEventListener('blur', handleWindowBlur)
+    window.addEventListener('focus', handleWindowFocus)
+
+    return () => {
+      clearTimeout(armTimer)
+      if (blurTimeout) clearTimeout(blurTimeout)
+      if (photoResetTimeout) clearTimeout(photoResetTimeout)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      window.removeEventListener('pagehide', handlePageHide)
+      window.removeEventListener('blur', handleWindowBlur)
+      window.removeEventListener('focus', handleWindowFocus)
+    }
+  }, [submissionId, isSubmitted, token])
+
   // Start exam session
   const handleStartExam = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -149,15 +282,17 @@ export default function StudentExamPage({
         return
       }
 
+      hasEndedSessionRef.current = false
+      setEndedByLeave(false)
       setSubmissionId(data.submission_id)
       setStudentName(data.student_name)
       setQuestions(data.questions || [])
 
       // Initial answers from server autosave if any
-      const initialAnswers: Record<string, number> = {}
+      const initialAnswers: Record<string, any> = {}
       data.questions.forEach((q: QuestionItem) => {
         if (q.saved_answer !== null && q.saved_answer !== undefined) {
-          initialAnswers[q.id] = Number(q.saved_answer)
+          initialAnswers[q.id] = q.type === 'essay' ? q.saved_answer : Number(q.saved_answer)
         }
       })
       setSelectedAnswers(initialAnswers)
@@ -231,8 +366,12 @@ export default function StudentExamPage({
   // Handle uploading answer paper photos
   const handleUploadPaperPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
-    if (!file) return
+    if (!file) {
+      isPickingPaperPhotoRef.current = false
+      return
+    }
 
+    setExamActionError(null)
     setUploadingPhoto(true)
     try {
       const formData = new FormData()
@@ -248,12 +387,13 @@ export default function StudentExamPage({
       if (res.ok && data.url) {
         setPaperPhotos((prev) => [...prev, data.url])
       } else {
-        alert(data.error || 'فشل رفع ورقة الإجابة')
+        setExamActionError(data.error || 'فشل رفع ورقة الإجابة')
       }
     } catch (err) {
       console.error('[Upload Paper] Error:', err)
-      alert('حدث خطأ أثناء رفع ورقة الإجابة')
+      setExamActionError('حدث خطأ أثناء رفع ورقة الإجابة')
     } finally {
+      isPickingPaperPhotoRef.current = false
       setUploadingPhoto(false)
       e.target.value = ''
     }
@@ -263,7 +403,9 @@ export default function StudentExamPage({
   const handleFinalSubmit = async () => {
     if (submitting || isSubmitted || !submissionId) return
 
+    setExamActionError(null)
     setSubmitting(true)
+    hasEndedSessionRef.current = true
     try {
       const res = await fetch(`/api/exam/${token}/submit`, {
         method: 'POST',
@@ -280,11 +422,13 @@ export default function StudentExamPage({
         setIsSubmitted(true)
         setResultData(data)
       } else {
-        alert(data.error || 'حدث خطأ أثناء تسليم الاختبار')
+        hasEndedSessionRef.current = false
+        setExamActionError(data.error || 'حدث خطأ أثناء تسليم الاختبار')
       }
     } catch (err) {
       console.error('[Submit Exam] Error:', err)
-      alert('فشل تسليم الاختبار، يرجى المحاولة مرة أخرى')
+      hasEndedSessionRef.current = false
+      setExamActionError('فشل تسليم الاختبار، يرجى المحاولة مرة أخرى')
     } finally {
       setSubmitting(false)
     }
@@ -320,19 +464,43 @@ export default function StudentExamPage({
     )
   }
 
-  // Render Step 3: Submitted State
+  // Render Step 3: Submitted / Ended State
   if (isSubmitted) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center bg-[#f6f8fb] p-4 text-[#17263b]">
         <div className="w-full max-w-lg rounded-3xl border border-[#e6ebf2] bg-white p-6 sm:p-8 text-center shadow-xl">
-          <div className="mx-auto grid size-16 place-items-center rounded-2xl bg-emerald-50 text-emerald-600">
-            <CheckCircle2 className="size-10" />
-          </div>
+          {endedByLeave ? (
+            <>
+              <div className="mx-auto grid size-16 place-items-center rounded-2xl bg-rose-50 text-rose-600">
+                <ShieldAlert className="size-10" />
+              </div>
 
-          <h2 className="mt-4 text-xl sm:text-2xl font-extrabold text-[#153b68]">تم تسليم الاختبار بنجاح</h2>
-          <p className="mt-2 text-xs sm:text-sm text-slate-600">
-            شكراً لك، <span className="font-bold text-slate-800">{studentName}</span>. تم تسجيل إجاباتك بنجاح على الخادم.
-          </p>
+              <h2 className="mt-4 text-xl sm:text-2xl font-extrabold text-rose-700">
+                تم إنهاء جلسة الاختبار تلقائياً
+              </h2>
+              <p className="mt-2 text-xs sm:text-sm text-slate-700 leading-relaxed">
+                الطالب <span className="font-bold text-slate-900">{studentName}</span>، تم إغلاق وإنهاء جلستك في الاختبار لأنك غادرت صفحة الاختبار أو انتقلت إلى تطبيق آخر.
+              </p>
+
+              <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50/80 p-4 text-xs font-bold text-rose-800 leading-relaxed">
+                <p>تم حفظ وتسليم الإجابات التي قمت باختيارها قبل مغادرة الجلسة.</p>
+                <p className="mt-1 font-normal text-rose-700">
+                  لا يمكنك إعادة الدخول للاختبار مرة أخرى إلا إذا قام المعلم بحذف سجل المحاولة الخاص بك.
+                </p>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="mx-auto grid size-16 place-items-center rounded-2xl bg-emerald-50 text-emerald-600">
+                <CheckCircle2 className="size-10" />
+              </div>
+
+              <h2 className="mt-4 text-xl sm:text-2xl font-extrabold text-[#153b68]">تم تسليم الاختبار بنجاح</h2>
+              <p className="mt-2 text-xs sm:text-sm text-slate-600">
+                شكراً لك، <span className="font-bold text-slate-800">{studentName}</span>. تم تسجيل إجاباتك بنجاح على الخادم.
+              </p>
+            </>
+          )}
 
           {resultData?.has_essay && (
             <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50/80 p-4 text-xs font-bold text-amber-800">
@@ -427,7 +595,6 @@ export default function StudentExamPage({
                 <input
                   type="text"
                   inputMode="numeric"
-                  pattern="[0-9]*"
                   required
                   value={accessCode}
                   onChange={(e) => setAccessCode(e.target.value)}
@@ -438,6 +605,23 @@ export default function StudentExamPage({
                 <p className="mt-1.5 text-center text-[11px] text-slate-400">
                   الكود مكوّن من ٤ إلى ٦ أرقام ومخصص لك من المعلم
                 </p>
+              </div>
+
+              {/* Anti-Cheat Session Leave Warning */}
+              <div className="rounded-2xl border-2 border-rose-200 bg-rose-50/80 p-3.5 text-xs text-rose-900 space-y-1.5">
+                <div className="flex items-center gap-1.5 font-extrabold text-rose-700">
+                  <ShieldAlert className="size-4 shrink-0" />
+                  <span>تنبيه هام قبل بدء الاختبار:</span>
+                </div>
+                <ul className="space-y-1 text-[11px] font-semibold leading-relaxed text-rose-800 pr-1">
+                  <li>• مسموح بالدخول للاختبار مرة واحدة فقط باستخدام كودك.</li>
+                  <li>
+                    • يُمنع الخروج من صفحة الاختبار أو الانتقال إلى أي تطبيق آخر على الموبايل أو فتح تبويب جديد.
+                  </li>
+                  <li>
+                    • <strong>إذا غادرت الجلسة سيتم إنهاء الاختبار تلقائياً</strong> ولن تتمكن من الدخول مرة أخرى إلا بعد حذف السجل من قِبل المعلم.
+                  </li>
+                </ul>
               </div>
 
               <button
@@ -498,8 +682,34 @@ export default function StudentExamPage({
         </div>
       </header>
 
+      {/* Persistent Anti-Cheat Warning Strip */}
+      <div className="border-b border-rose-200 bg-rose-50 px-4 py-2 text-center text-[11px] font-bold text-rose-800">
+        <div className="mx-auto flex max-w-3xl items-center justify-center gap-1.5">
+          <AlertTriangle className="size-3.5 shrink-0 text-rose-600" />
+          <span>
+            تحذير: الخروج من هذه الصفحة أو فتح أي تطبيق آخر على الموبايل سيُنهي جلسة الاختبار فوراً.
+          </span>
+        </div>
+      </div>
+
       {/* Main Question Flow */}
       <main className="mx-auto max-w-3xl px-3 sm:px-6 py-4 space-y-4">
+        {examActionError && (
+          <div className="flex items-center justify-between gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-xs font-bold text-rose-700">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="size-4 shrink-0" />
+              <span>{examActionError}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setExamActionError(null)}
+              className="text-rose-500 hover:text-rose-700"
+            >
+              <X className="size-4" />
+            </button>
+          </div>
+        )}
+
         {questions.map((q, qIndex) => {
           const isAnswered = selectedAnswers[q.id] !== undefined
           const selectedOpt = selectedAnswers[q.id]
@@ -642,11 +852,19 @@ export default function StudentExamPage({
             ))}
 
             {paperPhotos.length < 5 && (
-              <label className="grid size-20 place-items-center rounded-xl border-2 border-dashed border-[#1d5ca8]/40 bg-white cursor-pointer hover:bg-blue-50/80 transition">
+              <label
+                onClick={() => {
+                  isPickingPaperPhotoRef.current = true
+                }}
+                className="grid size-20 place-items-center rounded-xl border-2 border-dashed border-[#1d5ca8]/40 bg-white cursor-pointer hover:bg-blue-50/80 transition"
+              >
                 <input
                   type="file"
                   accept="image/*"
                   capture="environment"
+                  onClick={() => {
+                    isPickingPaperPhotoRef.current = true
+                  }}
                   onChange={handleUploadPaperPhoto}
                   className="hidden"
                   disabled={uploadingPhoto}
