@@ -131,12 +131,57 @@ export function MathRenderer({
     let match: RegExpExecArray | null
     const result: Segment[] = []
 
+    const renderBareMathSegments = (plainText: string): Segment[] => {
+      if (!plainText) return []
+      // Matches unwrapped expressions like X^2, x^{2n}, (x - 2)^2, 10^{-3}, or x_1 / a_{n}
+      const bareMathRegex =
+        /(?:\([A-Za-z0-9+\-*/.\s]+\)|[A-Za-z0-9]+)(?:\^(?:\{[^{}]+\}|-?[A-Za-z0-9]+))+|\b[A-Za-z]_(?:\{[^{}]+\}|\d+)\b/g
+
+      let bareLastIdx = 0
+      let bareMatch: RegExpExecArray | null
+      const out: Segment[] = []
+
+      while ((bareMatch = bareMathRegex.exec(plainText)) !== null) {
+        if (bareMatch.index > bareLastIdx) {
+          out.push({
+            type: 'text',
+            value: plainText.slice(bareLastIdx, bareMatch.index),
+          })
+        }
+
+        const expr = bareMatch[0]
+        try {
+          const html = katex.renderToString(expr.trim(), {
+            displayMode: false,
+            throwOnError: false,
+            output: 'htmlAndMathml',
+          })
+          out.push({
+            type: 'math',
+            isBlock: false,
+            html,
+            value: expr,
+          })
+        } catch {
+          out.push({ type: 'text', value: expr })
+        }
+
+        bareLastIdx = bareMathRegex.lastIndex
+      }
+
+      if (bareLastIdx < plainText.length) {
+        out.push({
+          type: 'text',
+          value: plainText.slice(bareLastIdx),
+        })
+      }
+
+      return out
+    }
+
     while ((match = mathRegex.exec(cleanedText)) !== null) {
       if (match.index > lastIndex) {
-        result.push({
-          type: 'text',
-          value: cleanedText.slice(lastIndex, match.index),
-        })
+        result.push(...renderBareMathSegments(cleanedText.slice(lastIndex, match.index)))
       }
 
       const isBlock = Boolean(match[1] !== undefined || match[2] !== undefined)
@@ -166,10 +211,7 @@ export function MathRenderer({
     }
 
     if (lastIndex < cleanedText.length) {
-      result.push({
-        type: 'text',
-        value: cleanedText.slice(lastIndex),
-      })
+      result.push(...renderBareMathSegments(cleanedText.slice(lastIndex)))
     }
 
     return result

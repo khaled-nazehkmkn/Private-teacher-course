@@ -15,6 +15,120 @@ export interface ParsedQuestion {
   model_answer?: string
 }
 
+const COLLIDING_LATEX_COMMANDS = new Set([
+  'frac',
+  'forall',
+  'fbox',
+  'times',
+  'theta',
+  'tan',
+  'tanh',
+  'text',
+  'textbf',
+  'textit',
+  'textrm',
+  'tau',
+  'triangle',
+  'top',
+  'tilde',
+  'to',
+  'beta',
+  'begin',
+  'binom',
+  'bar',
+  'bmod',
+  'boxed',
+  'big',
+  'bot',
+  'bullet',
+  'right',
+  'rightarrow',
+  'Rightarrow',
+  'rho',
+  'rangle',
+  'rfloor',
+  'rceil',
+  'root',
+  'neq',
+  'ne',
+  'nu',
+  'nabla',
+  'notin',
+  'not',
+  'neg',
+  'natural',
+])
+
+function repairJsonLatexEscapes(input: string): string {
+  let out = ''
+  let inString = false
+
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i]
+
+    if (!inString) {
+      if (ch === '"') inString = true
+      out += ch
+      continue
+    }
+
+    if (ch === '"') {
+      inString = false
+      out += ch
+      continue
+    }
+
+    if (ch === '\n') {
+      out += '\\n'
+      continue
+    }
+
+    if (ch === '\r') {
+      continue
+    }
+
+    if (ch === '\\') {
+      const next = input[i + 1]
+      if (next === undefined) {
+        out += '\\\\'
+        continue
+      }
+
+      if (next === '"' || next === '\\' || next === '/') {
+        out += ch + next
+        i += 1
+        continue
+      }
+
+      if (next === 'u' && /^[0-9a-fA-F]{4}/.test(input.slice(i + 2, i + 6))) {
+        out += ch + next
+        i += 1
+        continue
+      }
+
+      if (next === 'b' || next === 'f' || next === 'n' || next === 'r' || next === 't') {
+        const wordMatch = /^[a-zA-Z]+/.exec(input.slice(i + 1))
+        const word = wordMatch?.[0] || ''
+        if (COLLIDING_LATEX_COMMANDS.has(word)) {
+          out += '\\\\'
+          continue
+        }
+        out += ch + next
+        i += 1
+        continue
+      }
+
+      // Invalid JSON escape such as \sqrt, \mathbb, \circ, \pm, \{ -> double-escape
+      out += '\\\\'
+      continue
+    }
+
+    out += ch
+  }
+
+  return out
+}
+
 function cleanJsonText(raw: string): string {
   let cleaned = raw.trim()
   // Strip markdown code fences if teacher copied from ChatGPT / Gemini directly
@@ -23,7 +137,7 @@ function cleanJsonText(raw: string): string {
   } else if (cleaned.startsWith('```')) {
     cleaned = cleaned.replace(/^```\s*/i, '').replace(/\s*```$/i, '')
   }
-  return cleaned.trim()
+  return repairJsonLatexEscapes(cleaned.trim())
 }
 
 export function parseJsonQuestions(jsonContent: string): {
