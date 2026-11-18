@@ -45,10 +45,117 @@ export function isPureNumberOrLtr(text: string): boolean {
   // Matches numbers like -12, 48, 3.14, +5
   if (/^[-+]?\d+(\.\d+)?$/.test(trimmed)) return true
   // Matches math formulas or expressions
-  if (/^[-+*/=()a-zA-Z0-9\s.,^_{}\\$]+$/.test(trimmed) && !/[\u0600-\u06FF]/.test(trimmed)) {
+  if (/^[-+*/=()a-zA-Z0-9\s.,^_{}\\$√]+$/.test(trimmed) && !/[\u0600-\u06FF]/.test(trimmed)) {
     return true
   }
   return false
+}
+
+function extractBalancedGroup(
+  str: string,
+  openIndex: number,
+  openChar: '(' | '{' | '[',
+  closeChar: ')' | '}' | ']'
+): { content: string; endIndex: number } | null {
+  if (str[openIndex] !== openChar) return null
+  let depth = 0
+  for (let i = openIndex; i < str.length; i++) {
+    const ch = str[i]
+    if (ch === openChar) depth++
+    else if (ch === closeChar) {
+      depth--
+      if (depth === 0) {
+        return {
+          content: str.slice(openIndex + 1, i),
+          endIndex: i + 1,
+        }
+      }
+    }
+  }
+  return null
+}
+
+/**
+ * Normalizes root expressions inside LaTeX strings so bare `sqrt(...)`, `sqrt{...}`, `\sqrt(...)`,
+ * `cbrt(...)`, or Unicode `√(...)` render as proper KaTeX root signs.
+ */
+export function normalizeLatexMathContent(math: string): string {
+  if (!math) return ''
+  let out = ''
+  let i = 0
+
+  while (i < math.length) {
+    const slice = math.slice(i)
+    const cmdMatch = /^(?:(\\)?(sqrt|cbrt)\b|√)/i.exec(slice)
+
+    if (cmdMatch) {
+      const prevChar = i > 0 ? math[i - 1] : ''
+      // Avoid matching inside identifiers like `my_sqrt`
+      if (/[A-Za-z_]/.test(prevChar)) {
+        out += math[i]
+        i += 1
+        continue
+      }
+
+      const fullMatch = cmdMatch[0]
+      const isCbrt = (cmdMatch[2] || '').toLowerCase() === 'cbrt'
+      let cursor = i + fullMatch.length
+      let optionalIndex = ''
+
+      // Skip spaces between command and optional [n]
+      let tempCursor = cursor
+      while (tempCursor < math.length && /\s/.test(math[tempCursor])) tempCursor++
+      if (math[tempCursor] === '[') {
+        const bracketGroup = extractBalancedGroup(math, tempCursor, '[', ']')
+        if (bracketGroup) {
+          optionalIndex = `[${normalizeLatexMathContent(bracketGroup.content)}]`
+          cursor = bracketGroup.endIndex
+        }
+      } else if (isCbrt) {
+        optionalIndex = '[3]'
+      }
+
+      // Skip spaces between command and argument
+      let argStart = cursor
+      while (argStart < math.length && /\s/.test(math[argStart])) argStart++
+
+      if (math[argStart] === '{') {
+        const braceGroup = extractBalancedGroup(math, argStart, '{', '}')
+        if (braceGroup) {
+          out += `\\sqrt${optionalIndex}{${normalizeLatexMathContent(braceGroup.content)}}`
+          i = braceGroup.endIndex
+          continue
+        }
+      } else if (math[argStart] === '(') {
+        const parenGroup = extractBalancedGroup(math, argStart, '(', ')')
+        if (parenGroup) {
+          out += `\\sqrt${optionalIndex}{${normalizeLatexMathContent(parenGroup.content)}}`
+          i = parenGroup.endIndex
+          continue
+        }
+      } else {
+        const tokenMatch =
+          /^([A-Za-z0-9]+(?:\^(?:\{[^{}]+\}|-?[A-Za-z0-9]+)|_(?:\{[^{}]+\}|\d+))?)/.exec(
+            math.slice(argStart)
+          )
+        if (tokenMatch) {
+          out += `\\sqrt${optionalIndex}{${tokenMatch[1]}}`
+          i = argStart + tokenMatch[1].length
+          continue
+        }
+      }
+
+      // If no operand matched, preserve `\` prefix for valid LaTeX commands
+      out += fullMatch === '√' ? '\\sqrt' : cmdMatch[1] ? fullMatch : `\\${cmdMatch[2]}`
+      i += fullMatch.length
+      continue
+    }
+
+    out += math[i]
+    i += 1
+  }
+
+  return out
 }
 
 /**
@@ -131,48 +238,133 @@ export function MathRenderer({
     let match: RegExpExecArray | null
     const result: Segment[] = []
 
+    const renderKatexSegment = (rawMath: string, isBlock: boolean): Segment => {
+      const normalizedMath = normalizeLatexMathContent(rawMath.trim())
+      try {
+        const html = katex.renderToString(normalizedMath, {
+          displayMode: isBlock,
+          throwOnError: false,
+          output: 'htmlAndMathml',
+        })
+        return {
+          type: 'math',
+          isBlock,
+          html,
+          value: normalizedMath,
+        }
+      } catch (err) {
+        console.warn('[MathRenderer] KaTeX render error:', err)
+        return {
+          type: 'text',
+          value: rawMath,
+        }
+      }
+    }
+
+    const findNextBareRootMatch = (
+      plainText: string,
+      fromIndex: number
+    ): { start: number; end: number; expr: string } | null => {
+      const rootSearchRegex = /(?:\\?(?:sqrt|cbrt)\b|√)/gi
+      rootSearchRegex.lastIndex = fromIndex
+
+      let m: RegExpExecArray | null
+      while ((m = rootSearchRegex.exec(plainText)) !== null) {
+        const idx = m.index
+        const prevChar = idx > 0 ? plainText[idx - 1] : ''
+        if (/[A-Za-z_]/.test(prevChar)) continue
+
+        let cursor = idx + m[0].length
+        let tempCursor = cursor
+        while (tempCursor < plainText.length && /\s/.test(plainText[tempCursor])) tempCursor++
+
+        if (plainText[tempCursor] === '[') {
+          const bracket = extractBalancedGroup(plainText, tempCursor, '[', ']')
+          if (bracket) {
+            cursor = bracket.endIndex
+          }
+        }
+
+        let argStart = cursor
+        while (argStart < plainText.length && /\s/.test(plainText[argStart])) argStart++
+
+        if (plainText[argStart] === '(') {
+          const paren = extractBalancedGroup(plainText, argStart, '(', ')')
+          if (paren) {
+            return { start: idx, end: paren.endIndex, expr: plainText.slice(idx, paren.endIndex) }
+          }
+        } else if (plainText[argStart] === '{') {
+          const brace = extractBalancedGroup(plainText, argStart, '{', '}')
+          if (brace) {
+            return { start: idx, end: brace.endIndex, expr: plainText.slice(idx, brace.endIndex) }
+          }
+        } else {
+          // Only treat `sqrt x` / `sqrt 16` / `√16` without parens as math if operand is a number, single letter, or power
+          const tokenMatch =
+            /^(\d+(?:\.\d+)?(?:\^(?:\{[^{}]+\}|-?[A-Za-z0-9]+))?|[A-Za-z](?![A-Za-z])(?:\^(?:\{[^{}]+\}|-?[A-Za-z0-9]+)|_(?:\{[^{}]+\}|\d+))?)/.exec(
+              plainText.slice(argStart)
+            )
+          if (tokenMatch) {
+            const end = argStart + tokenMatch[1].length
+            return { start: idx, end, expr: plainText.slice(idx, end) }
+          }
+        }
+      }
+
+      return null
+    }
+
     const renderBareMathSegments = (plainText: string): Segment[] => {
       if (!plainText) return []
       // Matches unwrapped expressions like X^2, x^{2n}, (x - 2)^2, 10^{-3}, or x_1 / a_{n}
-      const bareMathRegex =
+      const barePowerOrSubRegex =
         /(?:\([A-Za-z0-9+\-*/.\s]+\)|[A-Za-z0-9]+)(?:\^(?:\{[^{}]+\}|-?[A-Za-z0-9]+))+|\b[A-Za-z]_(?:\{[^{}]+\}|\d+)\b/g
 
-      let bareLastIdx = 0
-      let bareMatch: RegExpExecArray | null
+      let cursor = 0
       const out: Segment[] = []
 
-      while ((bareMatch = bareMathRegex.exec(plainText)) !== null) {
-        if (bareMatch.index > bareLastIdx) {
+      while (cursor < plainText.length) {
+        const rootMatch = findNextBareRootMatch(plainText, cursor)
+        barePowerOrSubRegex.lastIndex = cursor
+        const powerMatch = barePowerOrSubRegex.exec(plainText)
+
+        let nextMatch: { start: number; end: number; expr: string } | null = null
+        if (rootMatch && powerMatch) {
+          nextMatch =
+            rootMatch.start <= powerMatch.index
+              ? rootMatch
+              : {
+                  start: powerMatch.index,
+                  end: powerMatch.index + powerMatch[0].length,
+                  expr: powerMatch[0],
+                }
+        } else if (rootMatch) {
+          nextMatch = rootMatch
+        } else if (powerMatch) {
+          nextMatch = {
+            start: powerMatch.index,
+            end: powerMatch.index + powerMatch[0].length,
+            expr: powerMatch[0],
+          }
+        }
+
+        if (!nextMatch) break
+
+        if (nextMatch.start > cursor) {
           out.push({
             type: 'text',
-            value: plainText.slice(bareLastIdx, bareMatch.index),
+            value: plainText.slice(cursor, nextMatch.start),
           })
         }
 
-        const expr = bareMatch[0]
-        try {
-          const html = katex.renderToString(expr.trim(), {
-            displayMode: false,
-            throwOnError: false,
-            output: 'htmlAndMathml',
-          })
-          out.push({
-            type: 'math',
-            isBlock: false,
-            html,
-            value: expr,
-          })
-        } catch {
-          out.push({ type: 'text', value: expr })
-        }
-
-        bareLastIdx = bareMathRegex.lastIndex
+        out.push(renderKatexSegment(nextMatch.expr, false))
+        cursor = nextMatch.end
       }
 
-      if (bareLastIdx < plainText.length) {
+      if (cursor < plainText.length) {
         out.push({
           type: 'text',
-          value: plainText.slice(bareLastIdx),
+          value: plainText.slice(cursor),
         })
       }
 
@@ -187,25 +379,7 @@ export function MathRenderer({
       const isBlock = Boolean(match[1] !== undefined || match[2] !== undefined)
       const mathContent = match[1] || match[2] || match[3] || match[4] || ''
 
-      try {
-        const html = katex.renderToString(mathContent.trim(), {
-          displayMode: isBlock,
-          throwOnError: false,
-          output: 'htmlAndMathml',
-        })
-        result.push({
-          type: 'math',
-          isBlock,
-          html,
-          value: mathContent,
-        })
-      } catch (err) {
-        console.warn('[MathRenderer] KaTeX render error:', err)
-        result.push({
-          type: 'text',
-          value: match[0],
-        })
-      }
+      result.push(renderKatexSegment(mathContent, isBlock))
 
       lastIndex = mathRegex.lastIndex
     }
