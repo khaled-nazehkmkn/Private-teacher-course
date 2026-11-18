@@ -154,8 +154,11 @@
 }
 
 @layer base {
-  html {
+  html,
+  body {
     color-scheme: light;
+    max-width: 100%;
+    overflow-x: clip;
   }
 
   * {
@@ -165,6 +168,23 @@
     @apply bg-background text-foreground;
     font-family: var(--font-cairo), Arial, sans-serif;
   }
+}
+
+.math-rendered-content {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.math-rendered-content .katex {
+  max-width: 100%;
+}
+
+.math-rendered-content .katex-display {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-block: 0.25rem;
 }
 
 @media print {

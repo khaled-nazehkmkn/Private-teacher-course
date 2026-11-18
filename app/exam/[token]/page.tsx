@@ -449,7 +449,7 @@ export default function StudentExamPage({
 
   if (loadingMeta) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#f6f8fb] text-[#17263b] p-4">
+      <div className="flex min-h-screen w-full max-w-full overflow-x-clip items-center justify-center bg-[#f6f8fb] text-[#17263b] p-4">
         <div className="flex items-center gap-3 rounded-2xl bg-white px-6 py-4 shadow-sm">
           <Loader2 className="size-5 animate-spin text-[#1d5ca8]" />
           <span className="text-sm font-bold">جاري تحميل الاختبار...</span>
@@ -460,7 +460,7 @@ export default function StudentExamPage({
 
   if (metaError || !meta) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center bg-[#f6f8fb] p-4 text-[#17263b]">
+      <div className="flex min-h-screen w-full max-w-full overflow-x-clip flex-col items-center justify-center bg-[#f6f8fb] p-4 text-[#17263b]">
         <div className="w-full max-w-md rounded-3xl border border-rose-200 bg-white p-6 sm:p-8 text-center shadow-lg">
           <div className="mx-auto grid size-14 place-items-center rounded-2xl bg-rose-50 text-rose-600">
             <AlertCircle className="size-8" />
@@ -475,7 +475,7 @@ export default function StudentExamPage({
   // Render Step 3: Submitted / Ended State
   if (isSubmitted) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center bg-[#f6f8fb] p-4 text-[#17263b]">
+      <div className="flex min-h-screen w-full max-w-full overflow-x-clip flex-col items-center justify-center bg-[#f6f8fb] p-4 text-[#17263b]">
         <div className="w-full max-w-lg rounded-3xl border border-[#e6ebf2] bg-white p-6 sm:p-8 text-center shadow-xl">
           {endedByLeave ? (
             <>
@@ -553,7 +553,7 @@ export default function StudentExamPage({
   // Render Step 1: Access Code Prompt
   if (!submissionId) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center bg-[#f6f8fb] p-4 text-[#17263b]">
+      <div className="flex min-h-screen w-full max-w-full overflow-x-clip flex-col items-center justify-center bg-[#f6f8fb] p-4 text-[#17263b]">
         <div className="w-full max-w-md rounded-3xl border border-[#e6ebf2] bg-white p-6 sm:p-8 shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
           <div className="flex flex-col items-center text-center">
             <div className="grid size-12 sm:size-14 place-items-center rounded-2xl bg-[#153b68] text-white shadow-md">
@@ -658,10 +658,10 @@ export default function StudentExamPage({
   const totalCount = questions.length
 
   return (
-    <div className="min-h-screen bg-[#f6f8fb] text-[#17263b] pb-24 sm:pb-12">
+    <div className="min-h-screen w-full max-w-full overflow-x-clip bg-[#f6f8fb] text-[#17263b] pb-24 sm:pb-12">
       {/* Sticky Top Mobile Header with Timer and Student Info */}
       <header className="sticky top-0 z-30 border-b border-[#e6ebf2] bg-white/95 backdrop-blur-md px-4 py-2.5 sm:py-3">
-        <div className="mx-auto flex max-w-3xl items-center justify-between">
+        <div className="mx-auto flex max-w-3xl items-center justify-between gap-2">
           <div className="min-w-0 pr-1">
             <h1 className="truncate text-sm sm:text-base font-extrabold text-[#153b68]">
               {meta.title}
@@ -669,7 +669,7 @@ export default function StudentExamPage({
             <p className="text-[11px] text-slate-500 truncate">الطالب: {studentName}</p>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             {/* Progress counter */}
             <span className="rounded-lg bg-slate-100 px-2 py-1 text-[11px] font-bold text-slate-700">
               {answeredCount}/{totalCount}
@@ -701,7 +701,7 @@ export default function StudentExamPage({
       </div>
 
       {/* Main Question Flow */}
-      <main className="mx-auto max-w-3xl px-3 sm:px-6 py-4 space-y-4">
+      <main className="mx-auto w-full min-w-0 max-w-3xl px-3 sm:px-6 py-4 space-y-4">
         {examActionError && (
           <div className="flex items-center justify-between gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-xs font-bold text-rose-700">
             <div className="flex items-center gap-2">
@@ -725,7 +725,7 @@ export default function StudentExamPage({
           return (
             <div
               key={q.id}
-              className={`rounded-2xl border bg-white p-4 sm:p-6 shadow-xs transition ${
+              className={`min-w-0 overflow-hidden rounded-2xl border bg-white p-4 sm:p-6 shadow-xs transition ${
                 isAnswered ? 'border-[#1d5ca8]/40 ring-1 ring-[#1d5ca8]/10' : 'border-slate-200'
               }`}
             >
@@ -800,13 +800,13 @@ export default function StudentExamPage({
                         key={optIdx}
                         type="button"
                         onClick={() => handleSelectOption(q.id, optIdx)}
-                        className={`flex min-h-[48px] w-full items-center justify-between rounded-xl border p-3 text-right text-xs sm:text-sm font-semibold transition active:scale-[0.99] ${
+                        className={`flex min-h-[48px] w-full min-w-0 items-center justify-between gap-2 rounded-xl border p-3 text-right text-xs sm:text-sm font-semibold transition active:scale-[0.99] ${
                           isSelected
                             ? 'border-[#1d5ca8] bg-[#eaf2ff] text-[#1d5ca8] shadow-xs'
                             : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
                         }`}
                       >
-                        <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="flex min-w-0 flex-1 items-center gap-2.5">
                           <span
                             className={`grid size-6 shrink-0 place-items-center rounded-full text-xs font-bold ${
                               isSelected
@@ -816,7 +816,7 @@ export default function StudentExamPage({
                           >
                             {String.fromCharCode(65 + optIdx)}
                           </span>
-                          <MathRenderer text={option} as="span" className="break-words" />
+                          <MathRenderer text={option} as="span" className="min-w-0 flex-1 break-words" />
                         </div>
                         {isSelected && <CheckCircle2 className="size-4 shrink-0 text-[#1d5ca8]" />}
                       </button>

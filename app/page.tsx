@@ -1581,7 +1581,7 @@ export default function TeacherAppPage() {
   }
 
   return (
-    <div className="flex min-h-screen bg-[#f6f8fb] text-[#17263b]">
+    <div className="flex min-h-screen w-full max-w-full overflow-x-clip bg-[#f6f8fb] text-[#17263b]">
       {/* Responsive Sidebar */}
       <Sidebar
         activeTab={activeTab}
@@ -1607,7 +1607,7 @@ export default function TeacherAppPage() {
           activeTab={activeTab}
         />
 
-        <main className="mx-auto w-full max-w-7xl flex-1 px-3.5 py-4 sm:px-8 sm:py-6 pb-24 lg:pb-8">
+        <main className="mx-auto w-full min-w-0 max-w-7xl flex-1 px-3.5 py-4 sm:px-8 sm:py-6 pb-24 lg:pb-8">
           {/* Read-Only Status Banner if suspended or expired */}
           <TeacherStatusBanner status={teacherStatus} />
 

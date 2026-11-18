@@ -229,7 +229,7 @@ export function ReportsView({ groups, students, absencesData, teacherName, subje
             {/* Students Roster */}
             <div>
               <h3 className="mb-3 text-sm font-extrabold text-slate-800">قائمة طلاب المجموعة:</h3>
-              <div className="overflow-hidden rounded-xl border border-slate-200">
+              <div className="overflow-x-auto rounded-xl border border-slate-200">
                 <table className="w-full text-right text-xs">
                   <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold">
                     <tr>

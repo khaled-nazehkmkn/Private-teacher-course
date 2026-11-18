@@ -107,8 +107,9 @@ export function Sidebar({
 
       {/* Sidebar container */}
       <aside
-        className={`fixed inset-y-0 right-0 z-50 flex w-64 flex-col justify-between border-l border-[#e6ebf2] bg-white p-4 transition-transform duration-200 lg:static lg:translate-x-0 ${
-          isOpen ? 'translate-x-0' : 'translate-x-full'
+        aria-hidden={!isOpen}
+        className={`fixed inset-y-0 right-0 z-50 flex w-64 max-w-[85vw] flex-col justify-between overflow-y-auto border-l border-[#e6ebf2] bg-white p-4 transition-transform duration-200 lg:static lg:translate-x-0 lg:pointer-events-auto lg:visible ${
+          isOpen ? 'translate-x-0 pointer-events-auto visible' : 'translate-x-full pointer-events-none invisible'
         }`}
       >
         <div>

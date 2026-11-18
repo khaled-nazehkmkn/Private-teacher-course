@@ -44,8 +44,11 @@ export function isPureNumberOrLtr(text: string): boolean {
   const trimmed = text.trim()
   // Matches numbers like -12, 48, 3.14, +5
   if (/^[-+]?\d+(\.\d+)?$/.test(trimmed)) return true
-  // Matches math formulas or expressions
-  if (/^[-+*/=()a-zA-Z0-9\s.,^_{}\\$√]+$/.test(trimmed) && !/[\u0600-\u06FF]/.test(trimmed)) {
+  // Matches math formulas, inequalities, or English expressions without Arabic characters
+  if (
+    /^[-+*/=()<>[\]|&%:;?!'"a-zA-Z0-9\s.,^_{}\\$√]+$/.test(trimmed) &&
+    !/[\u0600-\u06FF]/.test(trimmed)
+  ) {
     return true
   }
   return false
@@ -61,6 +64,10 @@ function extractBalancedGroup(
   let depth = 0
   for (let i = openIndex; i < str.length; i++) {
     const ch = str[i]
+    if (i > openIndex && ch === '\\' && i + 1 < str.length) {
+      i++
+      continue
+    }
     if (ch === openChar) depth++
     else if (ch === closeChar) {
       depth--
@@ -261,6 +268,56 @@ export function MathRenderer({
       }
     }
 
+    const BARE_LATEX_COMMANDS = new Set([
+      'geq', 'ge', 'leq', 'le', 'neq', 'ne', 'implies', 'impliedby', 'iff',
+      'Rightarrow', 'rightarrow', 'Leftarrow', 'leftarrow', 'leftrightarrow', 'Leftrightarrow',
+      'approx', 'equiv', 'cong', 'sim', 'propto', 'pm', 'mp', 'times', 'div', 'cdot', 'ast', 'star',
+      'infty', 'partial', 'nabla', 'forall', 'exists', 'nexists', 'in', 'notin', 'ni',
+      'subset', 'subseteq', 'supset', 'supseteq', 'cup', 'cap', 'setminus', 'emptyset', 'varnothing',
+      'alpha', 'beta', 'gamma', 'delta', 'epsilon', 'varepsilon', 'zeta', 'eta', 'theta', 'vartheta',
+      'iota', 'kappa', 'lambda', 'mu', 'nu', 'xi', 'pi', 'rho', 'sigma', 'tau', 'upsilon',
+      'phi', 'varphi', 'chi', 'psi', 'omega', 'Gamma', 'Delta', 'Theta', 'Lambda', 'Xi', 'Pi',
+      'Sigma', 'Upsilon', 'Phi', 'Psi', 'Omega', 'sin', 'cos', 'tan', 'cot', 'sec', 'csc',
+      'arcsin', 'arccos', 'arctan', 'sinh', 'cosh', 'tanh', 'log', 'ln', 'lg', 'lim', 'sup', 'inf',
+      'max', 'min', 'det', 'gcd', 'deg', 'circ', 'degree', 'angle', 'measuredangle', 'triangle',
+      'perp', 'parallel', 'because', 'therefore', 'dots', 'ldots', 'cdots', 'vdots', 'ddots',
+      'sum', 'prod', 'int', 'oint', 'prime', 'to', 'mapsto', 'mid', 'nmid',
+    ])
+
+    const consumeOptionalSuperSub = (str: string, start: number): number => {
+      let cursor = start
+      while (cursor < str.length && (str[cursor] === '^' || str[cursor] === '_')) {
+        const nextIdx = cursor + 1
+        if (nextIdx >= str.length) break
+        if (str[nextIdx] === '{') {
+          const grp = extractBalancedGroup(str, nextIdx, '{', '}')
+          if (grp) {
+            cursor = grp.endIndex
+            continue
+          }
+          break
+        }
+        const token = /^(?:\\[a-zA-Z]+|-?[A-Za-z0-9]+)/.exec(str.slice(nextIdx))
+        if (token) {
+          cursor = nextIdx + token[0].length
+          continue
+        }
+        break
+      }
+      return cursor
+    }
+
+    const consumeDelimiterAfterLeftRight = (str: string, pos: number): number => {
+      let c = pos
+      while (c < str.length && /\s/.test(str[c])) c++
+      if (c >= str.length) return pos
+      if (str[c] === '\\') {
+        const cmd = /^\\([a-zA-Z]+|.)/.exec(str.slice(c))
+        if (cmd) return c + cmd[0].length
+      }
+      return c + 1
+    }
+
     const findNextBareRootMatch = (
       plainText: string,
       fromIndex: number
@@ -291,12 +348,14 @@ export function MathRenderer({
         if (plainText[argStart] === '(') {
           const paren = extractBalancedGroup(plainText, argStart, '(', ')')
           if (paren) {
-            return { start: idx, end: paren.endIndex, expr: plainText.slice(idx, paren.endIndex) }
+            const end = consumeOptionalSuperSub(plainText, paren.endIndex)
+            return { start: idx, end, expr: plainText.slice(idx, end) }
           }
         } else if (plainText[argStart] === '{') {
           const brace = extractBalancedGroup(plainText, argStart, '{', '}')
           if (brace) {
-            return { start: idx, end: brace.endIndex, expr: plainText.slice(idx, brace.endIndex) }
+            const end = consumeOptionalSuperSub(plainText, brace.endIndex)
+            return { start: idx, end, expr: plainText.slice(idx, end) }
           }
         } else {
           // Only treat `sqrt x` / `sqrt 16` / `√16` without parens as math if operand is a number, single letter, or power
@@ -314,41 +373,143 @@ export function MathRenderer({
       return null
     }
 
+    const findNextBareLatexMatch = (
+      plainText: string,
+      fromIndex: number
+    ): { start: number; end: number; expr: string; isBlock?: boolean } | null => {
+      const cmdRegex = /\\([a-zA-Z]+)/g
+      cmdRegex.lastIndex = fromIndex
+
+      let m: RegExpExecArray | null
+      while ((m = cmdRegex.exec(plainText)) !== null) {
+        const idx = m.index
+        const cmdName = m[1]
+        const lowerCmd = cmdName.toLowerCase()
+
+        // Roots are handled uniformly by findNextBareRootMatch
+        if (lowerCmd === 'sqrt' || lowerCmd === 'cbrt') continue
+
+        // 1. \begin{env}...\end{env}
+        if (cmdName === 'begin') {
+          const envGroup = extractBalancedGroup(plainText, idx + 6, '{', '}')
+          if (envGroup) {
+            const envName = envGroup.content.trim()
+            const endTag = `\\end{${envName}}`
+            const endIdx = plainText.indexOf(endTag, envGroup.endIndex)
+            if (endIdx !== -1) {
+              const end = endIdx + endTag.length
+              return {
+                start: idx,
+                end,
+                expr: plainText.slice(idx, end),
+                isBlock: true,
+              }
+            }
+          }
+        }
+
+        // 2. \left ... \right (supporting nested \left / \right and trailing ^ or _)
+        if (cmdName === 'left') {
+          let depth = 1
+          let scan = consumeDelimiterAfterLeftRight(plainText, idx + 5)
+          while (scan < plainText.length && depth > 0) {
+            if (plainText.slice(scan).startsWith('\\left') && !/[a-zA-Z]/.test(plainText[scan + 5] || '')) {
+              depth++
+              scan = consumeDelimiterAfterLeftRight(plainText, scan + 5)
+              continue
+            }
+            if (plainText.slice(scan).startsWith('\\right') && !/[a-zA-Z]/.test(plainText[scan + 6] || '')) {
+              depth--
+              scan = consumeDelimiterAfterLeftRight(plainText, scan + 6)
+              if (depth === 0) {
+                const end = consumeOptionalSuperSub(plainText, scan)
+                return { start: idx, end, expr: plainText.slice(idx, end) }
+              }
+              continue
+            }
+            scan++
+          }
+        }
+
+        // 3. Any \command with optional scripts and/or [...] / {...} arguments, or known standalone math symbol
+        let cursor = idx + 1 + cmdName.length
+        const afterCmd = cursor
+        cursor = consumeOptionalSuperSub(plainText, cursor)
+        let hasBalancedArg = false
+
+        while (cursor < plainText.length) {
+          let lookahead = cursor
+          while (lookahead < plainText.length && /\s/.test(plainText[lookahead])) lookahead++
+          if (plainText[lookahead] === '{') {
+            const grp = extractBalancedGroup(plainText, lookahead, '{', '}')
+            if (grp) {
+              hasBalancedArg = true
+              cursor = grp.endIndex
+              continue
+            }
+          } else if (plainText[lookahead] === '[' && hasBalancedArg) {
+            const grp = extractBalancedGroup(plainText, lookahead, '[', ']')
+            if (grp) {
+              cursor = grp.endIndex
+              continue
+            }
+          } else if (plainText[lookahead] === '[' && (cmdName === 'frac' || cmdName === 'binom' || cmdName === 'text')) {
+            const grp = extractBalancedGroup(plainText, lookahead, '[', ']')
+            if (grp) {
+              hasBalancedArg = true
+              cursor = grp.endIndex
+              continue
+            }
+          }
+          break
+        }
+
+        cursor = consumeOptionalSuperSub(plainText, cursor)
+        const hasScripts = cursor > afterCmd
+
+        if (hasBalancedArg || hasScripts || BARE_LATEX_COMMANDS.has(cmdName)) {
+          return {
+            start: idx,
+            end: cursor,
+            expr: plainText.slice(idx, cursor),
+          }
+        }
+      }
+
+      return null
+    }
+
     const renderBareMathSegments = (plainText: string): Segment[] => {
       if (!plainText) return []
-      // Matches unwrapped expressions like X^2, x^{2n}, (x - 2)^2, 10^{-3}, or x_1 / a_{n}
+      // Matches unwrapped expressions like X^2, x^{2n}, (x - 2)^2, 10^{-3}, 180^\circ, or x_1 / a_{n}
       const barePowerOrSubRegex =
-        /(?:\([A-Za-z0-9+\-*/.\s]+\)|[A-Za-z0-9]+)(?:\^(?:\{[^{}]+\}|-?[A-Za-z0-9]+))+|\b[A-Za-z]_(?:\{[^{}]+\}|\d+)\b/g
+        /(?:\([A-Za-z0-9+\-*/.\s]+\)|[A-Za-z0-9]+)(?:\^(?:\{[^{}]+\}|\\[A-Za-z]+|-?[A-Za-z0-9]+))+|\b[A-Za-z]_(?:\{[^{}]+\}|\d+)\b/g
 
       let cursor = 0
       const out: Segment[] = []
 
       while (cursor < plainText.length) {
         const rootMatch = findNextBareRootMatch(plainText, cursor)
+        const latexMatch = findNextBareLatexMatch(plainText, cursor)
         barePowerOrSubRegex.lastIndex = cursor
         const powerMatch = barePowerOrSubRegex.exec(plainText)
 
-        let nextMatch: { start: number; end: number; expr: string } | null = null
-        if (rootMatch && powerMatch) {
-          nextMatch =
-            rootMatch.start <= powerMatch.index
-              ? rootMatch
-              : {
-                  start: powerMatch.index,
-                  end: powerMatch.index + powerMatch[0].length,
-                  expr: powerMatch[0],
-                }
-        } else if (rootMatch) {
-          nextMatch = rootMatch
-        } else if (powerMatch) {
-          nextMatch = {
+        const candidates: Array<{ start: number; end: number; expr: string; isBlock?: boolean }> = []
+        if (rootMatch) candidates.push(rootMatch)
+        if (latexMatch) candidates.push(latexMatch)
+        if (powerMatch) {
+          candidates.push({
             start: powerMatch.index,
             end: powerMatch.index + powerMatch[0].length,
             expr: powerMatch[0],
-          }
+          })
         }
 
-        if (!nextMatch) break
+        if (candidates.length === 0) break
+
+        // Pick earliest match; on tie prefer the longer match
+        candidates.sort((a, b) => (a.start !== b.start ? a.start - b.start : b.end - a.end))
+        const nextMatch = candidates[0]
 
         if (nextMatch.start > cursor) {
           out.push({
@@ -357,7 +518,7 @@ export function MathRenderer({
           })
         }
 
-        out.push(renderKatexSegment(nextMatch.expr, false))
+        out.push(renderKatexSegment(nextMatch.expr, Boolean(nextMatch.isBlock)))
         cursor = nextMatch.end
       }
 
@@ -399,7 +560,7 @@ export function MathRenderer({
   return (
     <Component
       dir={effectiveDir}
-      className={`math-rendered-content ${effectiveDir === 'ltr' ? 'text-left' : ''} ${className}`}
+      className={`math-rendered-content max-w-full ${effectiveDir === 'ltr' ? 'text-left' : ''} ${className}`}
       style={{ unicodeBidi: 'isolate' }}
     >
       {segments.map((seg, idx) => {
@@ -407,7 +568,7 @@ export function MathRenderer({
           return (
             <span
               key={idx}
-              className={`inline-math-item ${seg.isBlock ? 'my-2 block text-center' : 'inline-block mx-0.5 align-baseline'}`}
+              className={`inline-math-item max-w-full ${seg.isBlock ? 'my-2 block text-center' : 'inline-block mx-0.5 align-baseline'}`}
               dangerouslySetInnerHTML={{ __html: seg.html }}
               dir="ltr"
             />

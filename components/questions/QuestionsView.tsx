@@ -93,13 +93,14 @@ export const AI_PROMPT_TEMPLATE = String.raw`أنت معلم ومصمم اختب
    - "true_false": لأسئلة الصواب والخطأ. "options" تكون ["صواب", "خطأ"] (أو ["True", "False"] للإنجليزية)، و "correct" يكون [0] للصواب أو [1] للخطأ.
    - "essay": للأسئلة المقالية، مسائل الإثبات، أوجد الناتج، أو الأسئلة التي تتطلب خطوات حل. "options" مصفوفة فارغة []، و "correct" مصفوفة فارغة []، ويجب كتابة خطوات الحل والناتج النهائي بالتفصيل في حقل "model_answer".
 3. قواعد تنسيق المعادلات الرياضية (KaTeX) داخل JSON — حرجة جداً:
-   - يجب إحاطة **كل** تعبير أو رمز أو متغير أو أس أو جذر أو معادلة رياضية بعلامتي دولار $...$ في "body" و "options" و "model_answer".
-   - أمثلة صحيحة: "$X^2$"، "$x^2 + 5x + 6 = 0$"، "$x_1, x_2$"، "$\\frac{a}{b}$"، "$\\sqrt{x}$"، "$\\sqrt{X + 5}$"، "$\\sqrt[3]{8}$"، "$10^{-3}$".
+   - يجب إحاطة **كل** تعبير أو رمز أو متغير أو أس أو جذر أو كسر أو متباينة أو معادلة رياضية بعلامتي دولار $...$ في "body" و "options" و "model_answer" (سواء كانت الأسئلة بالعربية أو بالإنجليزية Math / Science، وبشكل خاص في خطوات الإثبات والحل داخل "model_answer").
+   - أمثلة صحيحة: "$X^2$"، "$x^2 + 5x + 6 = 0$"، "$x_1, x_2$"، "$\\frac{a}{b}$"، "$\\geq$"، "$\\leq$"، "$\\implies$"، "$\\sqrt{x}$"، "$\\sqrt{X + 5}$"، "$\\sqrt[3]{8}$"، "$10^{-3}$".
+   - الكسور والمتباينات والخطوات الإنجليزية (مهم جداً): أي كسر "\\frac{...}{...}" أو متباينة "\\geq" / "\\leq" / "\\neq" أو أقواس "\\left(...\\right)" أو سهم استنتاج "\\implies" يجب أن يكون **دائماً داخل "$...$"**. ممنوع منعاً باتاً كتابة أوامر LaTeX مكشوفة بدون "$...$" مثل: "Since \\left(\\frac{a - b}{2}\\right)^2 \\geq 0" أو "a - b = 0 \\implies a = b"؛ الصحيح دائماً هو وضعها داخل "$...$" هكذا: "Since $\\left(\\frac{a - b}{2}\\right)^2 \\geq 0$ and $\\sqrt{\\frac{a^2 + b^2}{2}} \\geq \\frac{a + b}{2}$, equality holds when $a - b = 0 \\implies a = b$.".
    - الجذور التربيعية والتكعيبية (مهم جداً): اكتب كل جذر بصيغة "$\\sqrt{...}$" (وللجذر التكعيبي أو النوني "$\\sqrt[3]{...}$" أو "$\\sqrt[n]{...}$") باستخدام الشرطتين المائلتين \\ والأقواس المعقوفة {} وليس (). ممنوع منعاً باتاً كتابة كلمة sqrt بدون الشرطتين المائلتين \\ أو بدون علامتي $ (ممنوع "sqrt(x)" أو "$sqrt(x)$" أو "\\sqrt(x)" أو "√x"؛ الصحيح دائماً هو "$\\sqrt{x}$" أو "$\\sqrt{X + 5}$").
-   - ممنوع منعاً باتاً ترك أي أس أو جذر أو رمز رياضي بدون علامتي $ (ممنوع كتابة X^2 أو x^2 أو x_1 أو a/b أو sqrt(x) كنص عادي بدون $...$).
-   - ممنوع استخدام رموز الأسس والجذور النصية مثل ² أو ³ أو √ أو ÷ أو ×؛ استبدلها دائماً بصيغة LaTeX داخل $...$ (مثل "$X^2$" و "$x^3$" و "$\\sqrt{x}$" و "$\\div$" و "$\\times$").
-   - افصل النص العربي عن المعادلة: اكتب الكلمات العربية خارج $...$ وضع الرموز الرياضية فقط داخل $...$ (مثال صحيح: "إذا كانت $\\sqrt{X^2 + 9} = 5$، فإن $X = \\pm 4$").
-   - قاعدة الهروب في JSON (Double Backslash): داخل نصوص JSON يجب كتابة شرطتين مائلتين \\ قبل كل أمر LaTeX حتى يظل كود JSON صالحاً ولا تتلف أوامر مثل \frac و \sqrt و \times و \theta و \neq و \right (مثال صحيح: "$\\frac{1}{2}$" و "$\\sqrt{x}$" و "$180^\\circ$"، وللمصفوفات "$\\begin{pmatrix} 1 & 2 \\\\ 3 & 4 \\end{pmatrix}$"، وممنوع كتابة شرطة واحدة مثل "\frac" أو "\sqrt" أو "\times").
+   - ممنوع منعاً باتاً ترك أي أس أو جذر أو كسر أو رمز رياضي بدون علامتي $ (ممنوع كتابة X^2 أو x^2 أو x_1 أو a/b أو \\frac{a}{b} أو \\geq أو \\implies أو sqrt(x) كنص عادي بدون $...$).
+   - ممنوع استخدام رموز الأسس والجذور النصية مثل ² أو ³ أو √ أو ÷ أو × أو ≥ أو ≤؛ استبدلها دائماً بصيغة LaTeX داخل $...$ (مثل "$X^2$" و "$x^3$" و "$\\sqrt{x}$" و "$\\div$" و "$\\times$" و "$\\geq$" و "$\\leq$").
+   - افصل النص عن المعادلة: اكتب الكلمات العربية أو الإنجليزية الشارحة خارج $...$ وضع التعبيرات والرموز الرياضية فقط داخل $...$ (مثال عربي صحيح: "إذا كانت $\\sqrt{X^2 + 9} = 5$، فإن $X = \\pm 4$"، ومثال إنجليزي صحيح: "If $a > 0$ and $b > 0$, prove that $\\sqrt{2(a^2 + b^2)} \\geq a + b$").
+   - قاعدة الهروب في JSON (Double Backslash): داخل نصوص JSON يجب كتابة شرطتين مائلتين \\ قبل كل أمر LaTeX حتى يظل كود JSON صالحاً ولا تتلف أوامر مثل \\frac و \\geq و \\leq و \\implies و \\left و \\right و \\sqrt و \\times و \\theta و \\neq (مثال صحيح: "$\\frac{1}{2}$" و "$\\geq 0$" و "$\\sqrt{x}$" و "$180^\\circ$"، وللمصفوفات "$\\begin{pmatrix} 1 & 2 \\\\ 3 & 4 \\end{pmatrix}$"، وممنوع كتابة شرطة واحدة مثل "\frac" أو "\geq" أو "\sqrt" أو "\times").
    - استخدم \n للانتقال لسطر جديد داخل "model_answer" بدلاً من كسر السطر الفعلي داخل نص JSON، وممنوع وضع علامات (backticks) حول المعادلات.
 4. منع وسوم البحث تماماً:
    - ممنوع منعاً باتاً تضمين أي علامات توثيق بحثية مثل [span_x] أو (start_span) أو (end_span).
@@ -489,17 +490,17 @@ export function QuestionsView({
   }
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 space-y-6">
       {/* Header */}
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-        <div>
+        <div className="min-w-0">
           <h2 className="text-xl font-extrabold text-[#153b68]">بنك الأسئلة</h2>
           <p className="text-xs text-slate-500">
             مستودع الأسئلة والاختيارات المتعددة (MCQ) مع إمكانية إعادة استخدامها وتوليد الاختبارات
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={() => setImportModalOpen(true)}
             disabled={!teacherStatus.isActive}
@@ -521,8 +522,8 @@ export function QuestionsView({
       </div>
 
       {/* Filter and Search Bar */}
-      <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-xs sm:flex-row sm:items-center">
-        <div className="relative flex-1">
+      <div className="flex min-w-0 flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-xs sm:flex-row sm:items-center">
+        <div className="relative min-w-0 flex-1">
           <Search className="absolute right-3 top-2.5 size-4 text-slate-400" />
           <input
             type="text"
@@ -533,14 +534,14 @@ export function QuestionsView({
           />
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           {groups.length > 0 && (
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs font-bold text-slate-400">المجموعة:</span>
+            <div className="flex max-w-full items-center gap-1.5">
+              <span className="shrink-0 text-xs font-bold text-slate-400">المجموعة:</span>
               <select
                 value={groupFilter}
                 onChange={(e) => setGroupFilter(e.target.value)}
-                className="rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 outline-hidden"
+                className="max-w-full rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 outline-hidden"
               >
                 <option value="all">كل المجموعات</option>
                 {groups.map((g) => (
@@ -552,15 +553,15 @@ export function QuestionsView({
             </div>
           )}
 
-          <div className="flex items-center gap-1.5">
-            <span className="text-xs font-bold text-slate-400">المرحلة:</span>
+          <div className="flex max-w-full items-center gap-1.5">
+            <span className="shrink-0 text-xs font-bold text-slate-400">المرحلة:</span>
             <select
               value={gradeFilter}
               onChange={(e) => {
                 setGradeFilter(e.target.value)
                 setLessonFilter('all')
               }}
-              className="rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 outline-hidden"
+              className="max-w-full rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 outline-hidden"
             >
               <option value="all">كل المراحل</option>
               <option value="الصف الأول الإعدادي">الصف الأول الإعدادي</option>
@@ -573,12 +574,12 @@ export function QuestionsView({
           </div>
 
           {availableLessons.length > 0 && (
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs font-bold text-slate-400">الدرس:</span>
+            <div className="flex w-full max-w-full items-center gap-1.5 sm:w-auto">
+              <span className="shrink-0 text-xs font-bold text-slate-400">الدرس:</span>
               <select
                 value={lessonFilter}
                 onChange={(e) => setLessonFilter(e.target.value)}
-                className="max-w-[200px] truncate rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 outline-hidden"
+                className="min-w-0 flex-1 truncate rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 outline-hidden sm:max-w-[200px]"
               >
                 <option value="all">كل الدروس ({availableLessons.length})</option>
                 {availableLessons.map((l) => (
@@ -599,11 +600,11 @@ export function QuestionsView({
           return (
             <div
               key={q.id}
-              className="flex flex-col justify-between rounded-2xl border border-slate-200 bg-white p-5 shadow-xs"
+              className="flex min-w-0 flex-col justify-between overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 sm:p-5 shadow-xs"
             >
-              <div>
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex flex-wrap items-center gap-1.5">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
                     <span className={`rounded-md px-2 py-0.5 text-xs font-bold ${
                       q.type === 'essay' ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-700'
                     }`}>
@@ -613,30 +614,30 @@ export function QuestionsView({
                       {q.grade || 'عام'}
                     </span>
                     {qLesson && (
-                      <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-0.5 text-xs font-bold text-emerald-800 border border-emerald-200/70">
-                        <BookMarked className="size-3 text-emerald-600" />
-                        <span>{qLesson}</span>
+                      <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-emerald-200/70 bg-emerald-50 px-2 py-0.5 text-xs font-bold text-emerald-800 break-words">
+                        <BookMarked className="size-3 shrink-0 text-emerald-600" />
+                        <span className="min-w-0 break-words">{qLesson}</span>
                       </span>
                     )}
                     {q.topic && q.topic.includes('|') ? (
                       <>
-                        <span className="rounded-md bg-purple-50 px-2 py-0.5 text-xs font-bold text-purple-700">
+                        <span className="max-w-full break-words rounded-md bg-purple-50 px-2 py-0.5 text-xs font-bold text-purple-700">
                           👥 {q.topic.split('|')[0].trim()}
                         </span>
                         {q.topic.split('|')[1]?.trim() && q.topic.split('|')[1]?.trim() !== qLesson && (
-                          <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-600">
+                          <span className="max-w-full break-words rounded-md bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-600">
                             {q.topic.split('|')[1].trim()}
                           </span>
                         )}
                       </>
                     ) : q.topic && q.topic !== qLesson ? (
-                      <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-600">
+                      <span className="max-w-full break-words rounded-md bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-600">
                         {q.topic}
                       </span>
                     ) : null}
                   </div>
 
-                  <div className="flex items-center gap-1">
+                  <div className="flex shrink-0 items-center gap-1">
                     <span className="text-xs font-bold text-slate-500 ml-1">{q.marks || 1} درجة</span>
                     <button
                       onClick={() => handleOpenEdit(q)}
@@ -691,31 +692,31 @@ export function QuestionsView({
 
                 {/* Options or Essay Indicator */}
                 {q.type === 'essay' ? (
-                  <div className="mt-3.5 rounded-xl border border-amber-200 bg-amber-50/60 p-3 text-xs">
+                  <div className="mt-3.5 min-w-0 max-w-full overflow-hidden rounded-xl border border-amber-200 bg-amber-50/60 p-3 text-xs">
                     <div className="flex items-center gap-1.5 font-bold text-amber-800">
                       <span>✍️ سؤال مقالي (تصحيح يدوي من المعلم)</span>
                     </div>
                     {q.model_answer && (
-                      <div className="mt-2 text-slate-700">
+                      <div className="mt-2 min-w-0 text-slate-700 leading-relaxed">
                         <span className="font-bold text-slate-900">نموذج الإجابة: </span>
                         <MathRenderer text={q.model_answer} as="span" />
                       </div>
                     )}
                   </div>
                 ) : (
-                  <div className="mt-3.5 space-y-1.5">
+                  <div className="mt-3.5 min-w-0 space-y-1.5">
                     {(q.options || []).map((opt, oIdx) => {
                       const isCorrect = q.correct?.includes(oIdx)
                       return (
                         <div
                           key={oIdx}
-                          className={`flex items-center justify-between rounded-xl px-3 py-2 text-xs font-semibold ${
+                          className={`flex min-w-0 items-center justify-between gap-2 rounded-xl px-3 py-2 text-xs font-semibold ${
                             isCorrect
                               ? 'border border-emerald-300 bg-emerald-50 text-emerald-800'
                               : 'bg-slate-50 text-slate-600'
                           }`}
                         >
-                          <MathRenderer text={opt} as="span" />
+                          <MathRenderer text={opt} as="span" className="min-w-0 flex-1" />
                           {isCorrect && (
                             <span className="flex items-center gap-1 text-[11px] font-bold text-emerald-700 shrink-0 mr-2">
                               <CheckCircle2 className="size-3.5" />

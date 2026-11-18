@@ -1113,7 +1113,7 @@ export function StudentsView({
                   تم التحقق من بيانات ({importedPreview.length}) طالب وجاهزون للإضافة:
                 </span>
               </div>
-              <div className="max-h-56 overflow-y-auto rounded-xl border border-slate-200">
+              <div className="max-h-56 overflow-x-auto overflow-y-auto rounded-xl border border-slate-200">
                 <table className="w-full text-right text-xs">
                   <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold sticky top-0">
                     <tr>
