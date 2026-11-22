@@ -30,6 +30,7 @@ import {
   RotateCcw,
   Search,
   Check,
+  Sparkles,
 } from 'lucide-react'
 import { Modal } from '@/components/ui/modal'
 import { DateTimePicker } from '@/components/ui/datetime-picker'
@@ -122,6 +123,12 @@ export function ExamsView({
   const [submissionsList, setSubmissionsList] = useState<ExamSubmissionDetail[]>([])
   const [loadingSubmissions, setLoadingSubmissions] = useState(false)
   const [deletingSubmissionId, setDeletingSubmissionId] = useState<string | null>(null)
+
+  // AI Auto-Grading & Report State
+  const [isAiGrading, setIsAiGrading] = useState(false)
+  const [aiGradeSuccess, setAiGradeSuccess] = useState<string | null>(null)
+  const [aiTeacherReport, setAiTeacherReport] = useState<any | null>(null)
+  const [reportModalOpen, setReportModalOpen] = useState(false)
 
   // Create Form State
   const [title, setTitle] = useState('')
@@ -387,6 +394,48 @@ export function ExamsView({
       alert(err?.message || 'فشل حذف سجل الطالب')
     } finally {
       setDeletingSubmissionId(null)
+    }
+  }
+
+  // Handle AI Auto-Grading & Report Generation
+  const handleAiGradeExam = async () => {
+    if (!selectedExamForResults) return
+    if (!teacherStatus.isActive) {
+      alert('حسابك غير نشط حالياً أو في وضع القراءة فقط.')
+      return
+    }
+
+    setIsAiGrading(true)
+    setAiGradeSuccess(null)
+    try {
+      const res = await fetch('/api/exam/ai-grade', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ exam_id: selectedExamForResults.id }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.error || 'فشل إجراء التصحيح الذكي')
+      }
+
+      // Refresh submissions list
+      const updatedSubs = await onFetchExamSubmissions(selectedExamForResults.id)
+      setSubmissionsList(updatedSubs)
+
+      if (data.report) {
+        setAiTeacherReport(data.report)
+        setReportModalOpen(true)
+      }
+
+      setAiGradeSuccess(
+        `تم التصحيح الذكي بنجاح لـ ${data.graded_count || updatedSubs.length} من الطلاب وتحديث الدرجات! ✨`
+      )
+      setTimeout(() => setAiGradeSuccess(null), 6000)
+    } catch (err: any) {
+      console.error('Error in AI grading:', err)
+      alert(err.message || 'حدث خطأ أثناء التصحيح الذكي')
+    } finally {
+      setIsAiGrading(false)
     }
   }
 
@@ -1375,6 +1424,60 @@ export function ExamsView({
             </div>
           </div>
 
+          {/* AI Auto-Grading & Analytics Banner */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-2xl bg-gradient-to-r from-blue-50/80 via-indigo-50/50 to-slate-50 border border-blue-200/70 p-4 shadow-2xs">
+            <div className="flex items-start sm:items-center gap-3">
+              <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-[#153b68] to-[#1d5ca8] text-amber-300 shadow-xs">
+                <Sparkles className="size-5" />
+              </div>
+              <div>
+                <h4 className="text-xs font-bold text-slate-800">التصحيح التلقائي الذكي والتحليلات التربوية (AI)</h4>
+                <p className="mt-0.5 text-[11px] text-slate-500">
+                  تصحيح الأسئلة المقالية تلقائياً بالذكاء الاصطناعي مع تقرير شامل بنقاط القوة والضعف وتوصيات للمعلم.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              {aiTeacherReport && (
+                <button
+                  type="button"
+                  onClick={() => setReportModalOpen(true)}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-indigo-200 bg-white px-3.5 py-2 text-xs font-bold text-indigo-700 shadow-xs hover:bg-indigo-50 transition active:scale-95"
+                >
+                  <BarChart3 className="size-3.5" />
+                  <span>عرض تقرير المعلم</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                disabled={isAiGrading || !teacherStatus.isActive || totalSubmissions === 0}
+                onClick={handleAiGradeExam}
+                className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#153b68] to-[#1d5ca8] px-4 py-2 text-xs font-bold text-white shadow-sm hover:from-[#112f54] hover:to-[#174984] disabled:opacity-50 transition active:scale-95"
+              >
+                {isAiGrading ? (
+                  <>
+                    <Loader2 className="size-3.5 animate-spin text-amber-300" />
+                    <span>جاري التصحيح الذكي والتحليل...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="size-3.5 text-amber-300" />
+                    <span>تصحيح ذكي بالذكاء الاصطناعي ✨</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {aiGradeSuccess && (
+            <div className="flex items-center gap-2 rounded-xl bg-emerald-50 border border-emerald-200 p-3 text-xs font-bold text-emerald-800 animate-in fade-in">
+              <CheckCircle2 className="size-4 shrink-0 text-emerald-600" />
+              <span>{aiGradeSuccess}</span>
+            </div>
+          )}
+
           {loadingSubmissions ? (
             <div className="flex justify-center p-8 text-xs font-bold text-[#1d5ca8]">
               <Loader2 className="size-5 animate-spin" />
@@ -1512,6 +1615,113 @@ export function ExamsView({
             </div>
           )}
         </div>
+      </Modal>
+
+      {/* AI Teacher Report & Pedagogical Recommendations Modal */}
+      <Modal
+        isOpen={reportModalOpen}
+        onClose={() => setReportModalOpen(false)}
+        title={`تقرير المعلم والتحليل التربوي: ${aiTeacherReport?.exam_title || selectedExamForResults?.title || ''}`}
+        maxWidth="max-w-3xl"
+      >
+        {aiTeacherReport ? (
+          <div className="space-y-6 text-right">
+            {/* Top Metric Cards */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 rounded-2xl bg-gradient-to-br from-slate-50 to-blue-50/50 p-4 border border-blue-100 text-center">
+              <div>
+                <p className="text-xs text-slate-400 font-bold">الطلاب المصححون</p>
+                <p className="mt-1 text-xl font-black text-slate-800">{aiTeacherReport.total_students}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-400 font-bold">متوسط الدرجات</p>
+                <p className="mt-1 text-xl font-black text-[#1d5ca8]">{aiTeacherReport.average_score}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-400 font-bold">متوسط النسبة</p>
+                <p className="mt-1 text-xl font-black text-emerald-600">{aiTeacherReport.average_percentage}%</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-400 font-bold">أعلى / أقل درجة</p>
+                <p className="mt-1 text-xl font-black text-slate-800">
+                  {aiTeacherReport.highest_score} / {aiTeacherReport.lowest_score}
+                </p>
+              </div>
+            </div>
+
+            {/* Strengths */}
+            {aiTeacherReport.strengths && aiTeacherReport.strengths.length > 0 && (
+              <div className="rounded-2xl border border-emerald-200/80 bg-emerald-50/40 p-4">
+                <h4 className="flex items-center gap-2 text-xs font-bold text-emerald-800 mb-2">
+                  <CheckCircle2 className="size-4 text-emerald-600" />
+                  <span>نقاط القوة وإتقان الطلاب:</span>
+                </h4>
+                <ul className="list-disc list-inside space-y-1 text-xs text-slate-700">
+                  {aiTeacherReport.strengths.map((str: string, i: number) => (
+                    <li key={i}>{str}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Problematic Questions */}
+            {aiTeacherReport.problematic_questions && aiTeacherReport.problematic_questions.length > 0 && (
+              <div className="space-y-3">
+                <h4 className="flex items-center gap-2 text-xs font-bold text-amber-800">
+                  <AlertCircle className="size-4 text-amber-600" />
+                  <span>الأسئلة الأكثر صعوبة ونقاط التعثر:</span>
+                </h4>
+                <div className="space-y-2">
+                  {aiTeacherReport.problematic_questions.map((pq: any, i: number) => (
+                    <div key={i} className="rounded-xl border border-amber-200/70 bg-amber-50/30 p-3 text-xs">
+                      <div className="flex items-center justify-between font-bold text-slate-800 mb-1">
+                        <span>سؤال: {pq.body_snippet}</span>
+                        <span className="rounded-md bg-amber-100 px-2 py-0.5 text-[11px] text-amber-800 font-bold">
+                          نسبة النجاح: {pq.success_rate}%
+                        </span>
+                      </div>
+                      <p className="text-slate-600 mt-1">
+                        <strong className="text-amber-900">الأخطاء الشائعة:</strong> {pq.common_mistakes}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Pedagogical Recommendations */}
+            {aiTeacherReport.recommendations_for_teacher && aiTeacherReport.recommendations_for_teacher.length > 0 && (
+              <div className="rounded-2xl border border-blue-200/80 bg-blue-50/40 p-4">
+                <h4 className="flex items-center gap-2 text-xs font-bold text-[#153b68] mb-2">
+                  <Sparkles className="size-4 text-blue-600" />
+                  <span>توصيات تربوية مقترحة للمعلم لعلاج نقاط القصور:</span>
+                </h4>
+                <ul className="list-disc list-inside space-y-1.5 text-xs text-slate-700">
+                  {aiTeacherReport.recommendations_for_teacher.map((rec: string, i: number) => (
+                    <li key={i}>{rec}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Footer */}
+            <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+              <span className="text-[11px] text-slate-400">
+                تاريخ التقرير: {new Date(aiTeacherReport.generated_at).toLocaleString('ar-EG')}
+              </span>
+              <button
+                type="button"
+                onClick={() => setReportModalOpen(false)}
+                className="rounded-xl bg-slate-100 px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-200 transition"
+              >
+                إغلاق التقرير
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="p-8 text-center text-xs text-slate-400">
+            لم يتم توليد تقرير بعد. اضغط على "تصحيح ذكي بالذكاء الاصطناعي" لتوليد التقرير.
+          </div>
+        )}
       </Modal>
 
       {/* Print PDF Paper Exam Modal */}
