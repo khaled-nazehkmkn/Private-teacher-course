@@ -28,6 +28,8 @@ import {
   Layers,
   Minus,
   RotateCcw,
+  Search,
+  Check,
 } from 'lucide-react'
 import { Modal } from '@/components/ui/modal'
 import { DateTimePicker } from '@/components/ui/datetime-picker'
@@ -166,6 +168,113 @@ export function ExamsView({
     return map
   }, [matchingQuestions, questions])
 
+  // New states for smart random by lesson & question type breakdown
+  const [selectedLessons, setSelectedLessons] = useState<string[]>([])
+  const [totalQuestionsCount, setTotalQuestionsCount] = useState(15)
+  const [choiceCount, setChoiceCount] = useState(10)
+  const [essayCount, setEssayCount] = useState(5)
+  const [showAdvancedLessonStepper, setShowAdvancedLessonStepper] = useState(false)
+  const [manualPickTypeFilter, setManualPickTypeFilter] = useState<'all' | 'mcq' | 'essay'>('all')
+  const [manualPickSearch, setManualPickSearch] = useState('')
+
+  const availableLessonNames = React.useMemo(() => {
+    return Object.keys(availableLessonGroups)
+  }, [availableLessonGroups])
+
+  // Auto-select all available lessons and set sensible defaults on modal open or group change
+  React.useEffect(() => {
+    if (createModalOpen) {
+      setSelectedLessons(availableLessonNames)
+      const pool = matchingQuestions.length > 0 ? matchingQuestions : questions
+      const maxTotal = pool.length
+      const defTotal = Math.min(15, Math.max(1, maxTotal))
+      setTotalQuestionsCount(defTotal)
+      const mcqs = pool.filter((q) => q.type !== 'essay').length
+      const essays = pool.filter((q) => q.type === 'essay').length
+      if (essays === 0) {
+        setChoiceCount(defTotal)
+        setEssayCount(0)
+      } else {
+        const targetChoice = Math.min(mcqs, Math.max(0, defTotal - Math.min(essays, 5)))
+        setChoiceCount(targetChoice)
+        setEssayCount(Math.max(0, defTotal - targetChoice))
+      }
+    }
+  }, [createModalOpen, targetGroupId, availableLessonNames])
+
+  // Selected lessons question pools
+  const selectedLessonsPool = React.useMemo(() => {
+    const pool = matchingQuestions.length > 0 ? matchingQuestions : questions
+    if (selectedLessons.length === 0) return []
+    return pool.filter((q) => {
+      const l = q.lesson || extractLessonFromTopic(q.topic) || 'عام / بدون درس محدد'
+      return selectedLessons.includes(l)
+    })
+  }, [matchingQuestions, questions, selectedLessons])
+
+  const availableMcqsInSelectedLessons = React.useMemo(() => {
+    return selectedLessonsPool.filter((q) => q.type !== 'essay')
+  }, [selectedLessonsPool])
+
+  const availableEssaysInSelectedLessons = React.useMemo(() => {
+    return selectedLessonsPool.filter((q) => q.type === 'essay')
+  }, [selectedLessonsPool])
+
+  const handleTotalQuestionsChange = (val: number) => {
+    const newTotal = Math.max(1, val)
+    setTotalQuestionsCount(newTotal)
+    if (choiceCount > newTotal) {
+      setChoiceCount(newTotal)
+      setEssayCount(0)
+    } else {
+      setEssayCount(newTotal - choiceCount)
+    }
+  }
+
+  const handleChoiceCountChange = (val: number) => {
+    const newChoice = Math.max(0, val)
+    setChoiceCount(newChoice)
+    if (newChoice <= totalQuestionsCount) {
+      setEssayCount(totalQuestionsCount - newChoice)
+    }
+  }
+
+  const handleEssayCountChange = (val: number) => {
+    const newEssay = Math.max(0, val)
+    setEssayCount(newEssay)
+    if (newEssay <= totalQuestionsCount) {
+      setChoiceCount(totalQuestionsCount - newEssay)
+    }
+  }
+
+  const handleSetPreset = (preset: 'all_mcq' | 'all_essay' | 'balanced') => {
+    if (preset === 'all_mcq') {
+      setChoiceCount(totalQuestionsCount)
+      setEssayCount(0)
+    } else if (preset === 'all_essay') {
+      setChoiceCount(0)
+      setEssayCount(totalQuestionsCount)
+    } else if (preset === 'balanced') {
+      const halfChoice = Math.ceil(totalQuestionsCount / 2)
+      setChoiceCount(halfChoice)
+      setEssayCount(totalQuestionsCount - halfChoice)
+    }
+  }
+
+  const handleToggleLesson = (lessonName: string) => {
+    setSelectedLessons((prev) =>
+      prev.includes(lessonName) ? prev.filter((l) => l !== lessonName) : [...prev, lessonName]
+    )
+  }
+
+  const handleSelectAllLessons = () => {
+    setSelectedLessons(availableLessonNames)
+  }
+
+  const handleDeselectAllLessons = () => {
+    setSelectedLessons([])
+  }
+
   // Print PDF Modal
   const [printModalOpen, setPrintModalOpen] = useState(false)
   const [printExam, setPrintExam] = useState<ExamItem | null>(null)
@@ -289,7 +398,7 @@ export function ExamsView({
     let finalQuestionIds = [...selectedQuestionIds]
 
     if (selectionMode === 'random') {
-      if (randomStrategy === 'by_lesson') {
+      if (showAdvancedLessonStepper && randomStrategy === 'by_lesson') {
         const pickedIds: string[] = []
         Object.entries(availableLessonGroups).forEach(([lessonName, qList]) => {
           const count = lessonCounts[lessonName] || 0
@@ -307,14 +416,75 @@ export function ExamsView({
 
         finalQuestionIds = pickedIds
       } else {
-        const pool = matchingQuestions.length > 0 ? matchingQuestions : questions
-        if (pool.length === 0) {
-          alert('لا توجد أسئلة في بنك الأسئلة كافية لإنشاء هذا الاختبار')
+        // Smart Selection by Lessons and Types Breakdown
+        if (selectedLessons.length === 0) {
+          alert('يرجى تحديد درس واحد على الأقل من قائمة الدروس المتاحة.')
           return
         }
-        // Pick random
-        const shuffledPool = [...pool].sort(() => Math.random() - 0.5)
-        finalQuestionIds = shuffledPool.slice(0, randomCount).map((q) => q.id)
+
+        if (totalQuestionsCount <= 0) {
+          alert('يرجى إدخال إجمالي عدد أسئلة صحيح (أكبر من صفر).')
+          return
+        }
+
+        const currentSum = choiceCount + essayCount
+        if (currentSum !== totalQuestionsCount) {
+          alert(
+            `مجموع أسئلة الاختيار (${choiceCount}) والأسئلة المقالية (${essayCount}) يساوي ${currentSum} سؤال، ولا يطابق إجمالي عدد الأسئلة المطلوب (${totalQuestionsCount} سؤال).\nيرجى تعديل الأعداد لتتطابق مع الإجمالي.`
+          )
+          return
+        }
+
+        const availMcq = availableMcqsInSelectedLessons.length
+        const availEssay = availableEssaysInSelectedLessons.length
+
+        if (choiceCount > availMcq || essayCount > availEssay) {
+          const proceed = confirm(
+            `تنبيه حول توفر الأسئلة في الدروس المحددة:\n` +
+            (choiceCount > availMcq ? `- أسئلة الاختيار من متعدد: مطلوب ${choiceCount} بينما المتوفر ${availMcq} فقط.\n` : '') +
+            (essayCount > availEssay ? `- الأسئلة المقالية: مطلوب ${essayCount} بينما المتوفر ${availEssay} فقط.\n` : '') +
+            `\nهل تريد المتابعة وسحب أقصى عدد متاح (${Math.min(choiceCount, availMcq) + Math.min(essayCount, availEssay)} سؤال)؟`
+          )
+          if (!proceed) return
+        }
+
+        // Balanced round-robin sampling across selected lessons
+        const pickBalanced = (pool: QuestionBankItem[], count: number): string[] => {
+          if (count <= 0 || pool.length === 0) return []
+          if (count >= pool.length) return pool.map((q) => q.id)
+
+          const byLesson: Record<string, QuestionBankItem[]> = {}
+          pool.forEach((q) => {
+            const l = q.lesson || extractLessonFromTopic(q.topic) || 'عام'
+            if (!byLesson[l]) byLesson[l] = []
+            byLesson[l].push(q)
+          })
+
+          Object.keys(byLesson).forEach((l) => {
+            byLesson[l].sort(() => Math.random() - 0.5)
+          })
+
+          const lessonKeys = Object.keys(byLesson).sort(() => Math.random() - 0.5)
+          const picked: QuestionBankItem[] = []
+
+          while (picked.length < count) {
+            let added = false
+            for (const key of lessonKeys) {
+              if (byLesson[key].length > 0 && picked.length < count) {
+                picked.push(byLesson[key].pop()!)
+                added = true
+              }
+            }
+            if (!added) break
+          }
+
+          return picked.map((q) => q.id)
+        }
+
+        const pickedMcqIds = pickBalanced(availableMcqsInSelectedLessons, choiceCount)
+        const pickedEssayIds = pickBalanced(availableEssaysInSelectedLessons, essayCount)
+
+        finalQuestionIds = [...pickedMcqIds, ...pickedEssayIds]
       }
 
       if (shuffle) {
@@ -522,7 +692,7 @@ export function ExamsView({
         isOpen={createModalOpen}
         onClose={() => setCreateModalOpen(false)}
         title="إنشاء اختبار جديد"
-        maxWidth="max-w-2xl"
+        maxWidth="max-w-3xl"
       >
         <form onSubmit={handleCreateSubmit} className="space-y-4">
           <div>
@@ -620,229 +790,487 @@ export function ExamsView({
             </div>
 
             {selectionMode === 'random' ? (
-              <div className="space-y-3 pt-1">
-                {/* Random Strategy Switcher */}
-                <div className="flex gap-2 rounded-xl bg-slate-100 p-1 text-xs font-bold">
-                  <button
-                    type="button"
-                    onClick={() => setRandomStrategy('by_lesson')}
-                    className={`flex-1 rounded-lg py-1.5 transition flex items-center justify-center gap-1.5 ${
-                      randomStrategy === 'by_lesson'
-                        ? 'bg-white text-[#1d5ca8] shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    <BookMarked className="size-3.5" />
-                    <span>توزيع مخصص حسب الدروس (موصى به)</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setRandomStrategy('all')}
-                    className={`flex-1 rounded-lg py-1.5 transition flex items-center justify-center gap-1.5 ${
-                      randomStrategy === 'all'
-                        ? 'bg-white text-[#1d5ca8] shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    <Shuffle className="size-3.5" />
-                    <span>عشوائي سريع من كامل الأسئلة</span>
-                  </button>
-                </div>
-
-                {randomStrategy === 'by_lesson' ? (
-                  <div className="space-y-2 rounded-2xl border border-blue-200 bg-blue-50/50 p-3">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 pb-2 border-b border-blue-100">
+              <div className="space-y-4 pt-1">
+                {/* Step 1: Select Lessons */}
+                <div className="rounded-2xl border border-blue-200 bg-blue-50/50 p-3.5 space-y-2.5">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-blue-100">
+                    <div className="flex items-center gap-2">
+                      <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-[#153b68] text-xs font-bold text-white">
+                        1
+                      </span>
                       <div>
-                        <p className="text-xs font-bold text-[#153b68]">
-                          حدد عدد الأسئلة المطلوبة عشوائياً من كل درس:
+                        <p className="text-xs font-extrabold text-[#153b68]">
+                          اختر الدروس المطلوب سحب الأسئلة منها:
                         </p>
                         <p className="text-[11px] text-blue-700">
-                          سيتم سحب الأسئلة عشوائياً لكل طالب وفق عدد الأسئلة المحدد لكل درس.
+                          حدد درساً واحداً أو عدة دروس لتشملها أسئلة الاختبار عشوائياً.
                         </p>
                       </div>
-                      <div className="flex items-center gap-2 shrink-0">
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto text-xs">
+                      <button
+                        type="button"
+                        onClick={handleSelectAllLessons}
+                        className="font-bold text-[#1d5ca8] hover:underline"
+                      >
+                        تحديد كل الدروس ({availableLessonNames.length})
+                      </button>
+                      <span className="text-slate-300">|</span>
+                      <button
+                        type="button"
+                        onClick={handleDeselectAllLessons}
+                        className="font-bold text-rose-600 hover:underline"
+                      >
+                        إلغاء التحديد
+                      </button>
+                    </div>
+                  </div>
+
+                  {availableLessonNames.length === 0 ? (
+                    <p className="text-center py-4 text-xs font-bold text-slate-400">
+                      لا توجد أسئلة مسجلة لهذه المرحلة في بنك الأسئلة حالياً.
+                    </p>
+                  ) : (
+                    <div className="max-h-52 overflow-y-auto space-y-1.5 pr-1">
+                      {availableLessonNames.map((lessonName) => {
+                        const qList = availableLessonGroups[lessonName] || []
+                        const mcqCount = qList.filter((q) => q.type !== 'essay').length
+                        const essayCount = qList.filter((q) => q.type === 'essay').length
+                        const isSelected = selectedLessons.includes(lessonName)
+
+                        return (
+                          <div
+                            key={lessonName}
+                            onClick={() => handleToggleLesson(lessonName)}
+                            className={`flex items-center justify-between gap-2 rounded-xl border p-2.5 transition cursor-pointer select-none ${
+                              isSelected
+                                ? 'border-[#1d5ca8] bg-white shadow-xs ring-1 ring-[#1d5ca8]/20'
+                                : 'border-slate-200/80 bg-white/60 hover:bg-white text-slate-500'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => {}}
+                                className="size-4 rounded text-[#1d5ca8]"
+                              />
+                              <div className="min-w-0">
+                                <span className={`text-xs font-bold truncate block ${isSelected ? 'text-slate-800' : 'text-slate-600'}`}>
+                                  {lessonName}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0 text-[10px] font-semibold">
+                              <span className="rounded bg-blue-50 text-[#1d5ca8] px-1.5 py-0.5 border border-blue-100">
+                                {mcqCount} اختيار
+                              </span>
+                              <span className="rounded bg-amber-50 text-amber-800 px-1.5 py-0.5 border border-amber-100">
+                                {essayCount} مقالي
+                              </span>
+                              <span className="rounded bg-slate-100 text-slate-600 px-1.5 py-0.5">
+                                إجمالي {qList.length}
+                              </span>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+
+                  {/* Pool summary badge */}
+                  <div className="flex flex-wrap items-center justify-between gap-1.5 rounded-xl bg-blue-100/70 px-3 py-2 text-xs font-bold text-[#153b68]">
+                    <span>إجمالي المتوفر في الدروس المحددة ({selectedLessons.length} دروس):</span>
+                    <span className="rounded-lg bg-[#1d5ca8] px-2.5 py-0.5 text-white">
+                      {availableMcqsInSelectedLessons.length} اختيار + {availableEssaysInSelectedLessons.length} مقالي = {selectedLessonsPool.length} سؤال متاح
+                    </span>
+                  </div>
+                </div>
+
+                {/* Step 2: Total Amount of Questions */}
+                <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-[#153b68] text-xs font-bold text-white">
+                      2
+                    </span>
+                    <div>
+                      <label className="text-xs font-extrabold text-[#153b68]">
+                        إجمالي عدد الأسئلة المطلوب للاختبار:
+                      </label>
+                      <p className="text-[11px] text-slate-500">
+                        العدد الكلي للأسئلة التي سيحتويها الاختبار للطالب.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3 pt-1">
+                    <input
+                      type="number"
+                      min="1"
+                      max={Math.max(100, selectedLessonsPool.length)}
+                      value={totalQuestionsCount}
+                      onChange={(e) => handleTotalQuestionsChange(Number(e.target.value))}
+                      className="w-28 rounded-xl border border-slate-200 bg-white p-2.5 text-center text-sm font-black text-[#153b68] shadow-xs outline-hidden focus:border-[#1d5ca8]"
+                    />
+                    <span className="text-xs font-bold text-slate-700">سؤال</span>
+                    <span className="text-[11px] text-slate-400">
+                      (الحد الأقصى المتاح في الدروس المحددة: {selectedLessonsPool.length} سؤال)
+                    </span>
+                  </div>
+                </div>
+
+                {/* Step 3: Breakdown by Question Type */}
+                <div className="rounded-2xl border border-slate-200 bg-white p-3.5 space-y-3 shadow-xs">
+                  <div className="flex items-center gap-2">
+                    <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-[#153b68] text-xs font-bold text-white">
+                      3
+                    </span>
+                    <div>
+                      <p className="text-xs font-extrabold text-[#153b68]">
+                        تحديد أنواع الأسئلة (اختيار من متعدد vs مقالي):
+                      </p>
+                      <p className="text-[11px] text-slate-500">
+                        حدد كم سؤال اختيار وكم سؤال مقالي بحيث يكون المجموع مساوياً لإجمالي الأسئلة المحدد أعلاه ({totalQuestionsCount} سؤال).
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Choice vs Essay Inputs */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {/* MCQ / Choice */}
+                    <div className="rounded-xl border border-blue-200 bg-blue-50/40 p-3 space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-bold text-blue-950">
+                          أسئلة الاختيار من متعدد:
+                        </label>
+                        <span className="rounded bg-blue-100 text-[#1d5ca8] px-2 py-0.5 text-[10px] font-bold">
+                          تصحيح تلقائي
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          min="0"
+                          max={totalQuestionsCount}
+                          value={choiceCount}
+                          onChange={(e) => handleChoiceCountChange(Number(e.target.value))}
+                          className="w-24 rounded-lg border border-blue-300 bg-white p-2 text-center text-sm font-black text-slate-800 outline-hidden focus:border-[#1d5ca8]"
+                        />
+                        <span className="text-xs font-semibold text-slate-600">سؤال اختيار</span>
+                      </div>
+                      <p className="text-[11px] text-blue-700">
+                        المتوفر في الدروس المحددة: {availableMcqsInSelectedLessons.length} سؤال
+                      </p>
+                      {choiceCount > availableMcqsInSelectedLessons.length && (
+                        <p className="text-[10px] font-bold text-rose-600">
+                          ⚠️ العدد المطلوب ({choiceCount}) يتجاوز المتوفر ({availableMcqsInSelectedLessons.length}).
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Essay */}
+                    <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-3 space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-bold text-amber-950">
+                          الأسئلة المقالية والمسائل:
+                        </label>
+                        <span className="rounded bg-amber-100 text-amber-800 px-2 py-0.5 text-[10px] font-bold">
+                          تصحيح يدوي / ورقي
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          min="0"
+                          max={totalQuestionsCount}
+                          value={essayCount}
+                          onChange={(e) => handleEssayCountChange(Number(e.target.value))}
+                          className="w-24 rounded-lg border border-amber-300 bg-white p-2 text-center text-sm font-black text-slate-800 outline-hidden focus:border-amber-500"
+                        />
+                        <span className="text-xs font-semibold text-slate-600">سؤال مقالي</span>
+                      </div>
+                      <p className="text-[11px] text-amber-700">
+                        المتوفر في الدروس المحددة: {availableEssaysInSelectedLessons.length} سؤال
+                      </p>
+                      {essayCount > availableEssaysInSelectedLessons.length && (
+                        <p className="text-[10px] font-bold text-rose-600">
+                          ⚠️ العدد المطلوب ({essayCount}) يتجاوز المتوفر ({availableEssaysInSelectedLessons.length}).
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Quick Presets */}
+                  <div className="flex flex-wrap items-center gap-1.5 pt-1 text-xs">
+                    <span className="text-[11px] font-bold text-slate-400">توزيعات سريعة:</span>
+                    <button
+                      type="button"
+                      onClick={() => handleSetPreset('all_mcq')}
+                      className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-bold text-slate-700 hover:bg-slate-100 transition"
+                    >
+                      كلها اختيار من متعدد ({totalQuestionsCount})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSetPreset('all_essay')}
+                      className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-bold text-slate-700 hover:bg-slate-100 transition"
+                    >
+                      كلها مقالي ({totalQuestionsCount})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSetPreset('balanced')}
+                      className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-bold text-slate-700 hover:bg-slate-100 transition"
+                    >
+                      مناصفة متوازنة ({Math.ceil(totalQuestionsCount / 2)} اختيار + {Math.floor(totalQuestionsCount / 2)} مقالي)
+                    </button>
+                  </div>
+
+                  {/* Validation Indicator Bar */}
+                  {choiceCount + essayCount === totalQuestionsCount ? (
+                    <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800">
+                      <CheckCircle2 className="size-4 text-emerald-600 shrink-0" />
+                      <span>
+                        المجموع مطابق تماماً لإجمالي الأسئلة: {choiceCount} اختيار من متعدد + {essayCount} مقالي = {totalQuestionsCount} سؤال إجمالي ✓
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-900">
+                      <div className="flex items-center gap-2">
+                        <AlertCircle className="size-4 text-amber-600 shrink-0" />
+                        <span>
+                          المجموع الحالي ({choiceCount} اختيار + {essayCount} مقالي = {choiceCount + essayCount}) لا يطابق الإجمالي المطلوب ({totalQuestionsCount})
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5 self-end sm:self-auto">
                         <button
                           type="button"
-                          onClick={() => {
-                            const allCounts: Record<string, number> = {}
-                            Object.entries(availableLessonGroups).forEach(([l, list]) => {
-                              allCounts[l] = list.length
-                            })
-                            setLessonCounts(allCounts)
-                          }}
-                          className="text-[11px] font-bold text-[#1d5ca8] hover:underline"
+                          onClick={() => setEssayCount(Math.max(0, totalQuestionsCount - choiceCount))}
+                          className="rounded-lg bg-amber-600 px-2 py-1 text-[11px] text-white hover:bg-amber-700"
                         >
-                          تحديد الكل
+                          تعديل المقالي ليصبح {Math.max(0, totalQuestionsCount - choiceCount)}
                         </button>
-                        <span className="text-slate-300">|</span>
                         <button
                           type="button"
-                          onClick={() => setLessonCounts({})}
-                          className="text-[11px] font-bold text-rose-600 hover:underline"
+                          onClick={() => setTotalQuestionsCount(choiceCount + essayCount)}
+                          className="rounded-lg border border-amber-300 bg-white px-2 py-1 text-[11px] text-amber-900 hover:bg-amber-100"
                         >
-                          تصفير
+                          تعديل الإجمالي ليصبح {choiceCount + essayCount}
                         </button>
                       </div>
                     </div>
+                  )}
+                </div>
 
-                    {Object.keys(availableLessonGroups).length === 0 ? (
-                      <p className="text-center py-4 text-xs font-bold text-slate-400">
-                        لا توجد أسئلة مسجلة لهذه المرحلة في بنك الأسئلة حالياً.
+                {/* Optional toggle for legacy granular per-lesson count stepper */}
+                <div className="pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setShowAdvancedLessonStepper((prev) => !prev)}
+                    className="text-[11px] font-bold text-slate-500 hover:text-slate-800 flex items-center gap-1"
+                  >
+                    <span>{showAdvancedLessonStepper ? '▲ إخفاء التوزيع المخصص لكل درس على حدة' : '⚙️ أو تحديد عدد مخصص لكل درس على حدة (خيارات متقدمة)'}</span>
+                  </button>
+
+                  {showAdvancedLessonStepper && (
+                    <div className="mt-2 space-y-2 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                      <p className="text-xs font-bold text-slate-700">
+                        تحديد عدد الأسئلة من كل درس بشكل يدوي منفصل:
                       </p>
-                    ) : (
-                      <div className="max-h-56 overflow-y-auto space-y-2 pr-1">
-                        {Object.entries(availableLessonGroups).map(([lessonName, qList]) => {
+                      <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1">
+                        {availableLessonNames.map((lessonName) => {
+                          const qList = availableLessonGroups[lessonName] || []
                           const count = lessonCounts[lessonName] || 0
                           const max = qList.length
-
                           return (
                             <div
                               key={lessonName}
-                              className={`flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-xl border p-2.5 transition ${
-                                count > 0
-                                  ? 'border-[#1d5ca8]/40 bg-white shadow-xs'
-                                  : 'border-slate-200/80 bg-white/70'
-                              }`}
+                              className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white p-2 text-xs"
                             >
-                              <div className="min-w-0 flex-1">
-                                <div className="flex items-center gap-1.5">
-                                  <BookMarked className="size-3.5 text-[#1d5ca8] shrink-0" />
-                                  <span className="text-xs font-bold text-slate-800 truncate">
-                                    {lessonName}
-                                  </span>
-                                </div>
-                                <span className="text-[11px] text-slate-400 font-semibold mr-5">
-                                  متوفر في البنك: {max} {max === 1 ? 'سؤال' : 'أسئلة'}
-                                </span>
-                              </div>
-
-                              <div className="flex items-center gap-2 self-end sm:self-center">
-                                <div className="flex items-center rounded-lg border border-slate-200 bg-slate-50">
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      setLessonCounts((prev) => ({
-                                        ...prev,
-                                        [lessonName]: Math.max(0, (prev[lessonName] || 0) - 1),
-                                      }))
-                                    }
-                                    className="px-2 py-1 text-xs font-bold text-slate-600 hover:bg-slate-200 rounded-r-lg"
-                                  >
-                                    -
-                                  </button>
-                                  <input
-                                    type="number"
-                                    min="0"
-                                    max={max}
-                                    value={count}
-                                    onChange={(e) => {
-                                      const val = Math.max(0, Math.min(max, Number(e.target.value) || 0))
-                                      setLessonCounts((prev) => ({
-                                        ...prev,
-                                        [lessonName]: val,
-                                      }))
-                                    }}
-                                    className="w-12 text-center text-xs font-bold bg-white py-1 outline-hidden"
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      setLessonCounts((prev) => ({
-                                        ...prev,
-                                        [lessonName]: Math.min(max, (prev[lessonName] || 0) + 1),
-                                      }))
-                                    }
-                                    className="px-2 py-1 text-xs font-bold text-slate-600 hover:bg-slate-200 rounded-l-lg"
-                                  >
-                                    +
-                                  </button>
-                                </div>
+                              <span className="font-bold text-slate-800 truncate flex-1">{lessonName}</span>
+                              <div className="flex items-center rounded-lg border border-slate-200 bg-slate-50">
                                 <button
                                   type="button"
                                   onClick={() =>
                                     setLessonCounts((prev) => ({
                                       ...prev,
-                                      [lessonName]: max,
+                                      [lessonName]: Math.max(0, (prev[lessonName] || 0) - 1),
                                     }))
                                   }
-                                  className="rounded-lg bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-600 hover:bg-slate-200"
+                                  className="px-2 py-0.5 text-xs font-bold hover:bg-slate-200"
                                 >
-                                  الكل ({max})
+                                  -
+                                </button>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  max={max}
+                                  value={count}
+                                  onChange={(e) => {
+                                    const val = Math.max(0, Math.min(max, Number(e.target.value) || 0))
+                                    setLessonCounts((prev) => ({ ...prev, [lessonName]: val }))
+                                  }}
+                                  className="w-10 text-center font-bold outline-hidden bg-white py-0.5"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setLessonCounts((prev) => ({
+                                      ...prev,
+                                      [lessonName]: Math.min(max, (prev[lessonName] || 0) + 1),
+                                    }))
+                                  }
+                                  className="px-2 py-0.5 text-xs font-bold hover:bg-slate-200"
+                                >
+                                  +
                                 </button>
                               </div>
+                              <span className="text-[10px] text-slate-400 font-semibold w-12 text-left">
+                                من {max}
+                              </span>
                             </div>
                           )
                         })}
                       </div>
-                    )}
-
-                    {/* Summary Counter */}
-                    <div className="flex items-center justify-between rounded-xl bg-blue-100/70 px-3 py-2 text-xs font-bold text-[#153b68]">
-                      <span>إجمالي الأسئلة العشوائية المحددة للاختبار:</span>
-                      <span className="rounded-lg bg-[#1d5ca8] px-2.5 py-0.5 text-white">
-                        {Object.values(lessonCounts).reduce((a, b) => a + (b || 0), 0)} سؤال
-                      </span>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-3 rounded-xl bg-slate-50 p-3 text-xs">
-                    <span className="font-bold text-slate-700">عدد الأسئلة العشوائية المطلوبة:</span>
-                    <input
-                      type="number"
-                      min="1"
-                      max="100"
-                      value={randomCount}
-                      onChange={(e) => setRandomCount(Number(e.target.value))}
-                      className="w-20 rounded-lg border border-slate-200 bg-white p-1 text-center font-bold"
-                    />
-                    <span className="text-[11px] text-slate-400">
-                      (سيتم اختيارها عشوائياً من كامل بنك الأسئلة المتاح لهذه المرحلة)
-                    </span>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-xs pb-1">
-                  <span className="font-bold text-slate-600">
-                    تم تحديد {selectedQuestionIds.length} سؤال يدوي
-                  </span>
-                  {Object.keys(availableLessonGroups).length > 1 && (
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[11px] font-bold text-slate-400">تصفية بالدرس:</span>
-                      <select
-                        value={manualPickLessonFilter}
-                        onChange={(e) => setManualPickLessonFilter(e.target.value)}
-                        className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs outline-hidden"
-                      >
-                        <option value="all">كل الدروس ({Object.keys(availableLessonGroups).length})</option>
-                        {Object.keys(availableLessonGroups).map((l) => (
-                          <option key={l} value={l}>
-                            {l} ({availableLessonGroups[l]?.length})
-                          </option>
-                        ))}
-                      </select>
                     </div>
                   )}
                 </div>
+              </div>
+            ) : (
+              <div className="space-y-2.5">
+                {/* Manual Pick Controls: Filters & Search */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-2 text-xs">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {/* Lesson Filter */}
+                    <select
+                      value={manualPickLessonFilter}
+                      onChange={(e) => setManualPickLessonFilter(e.target.value)}
+                      className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs outline-hidden"
+                    >
+                      <option value="all">كل الدروس ({availableLessonNames.length})</option>
+                      {availableLessonNames.map((l) => (
+                        <option key={l} value={l}>
+                          {l} ({availableLessonGroups[l]?.length})
+                        </option>
+                      ))}
+                    </select>
 
-                <div className="max-h-52 overflow-y-auto rounded-xl border border-slate-200 p-2 text-xs space-y-1.5">
+                    {/* Question Type Filter */}
+                    <div className="flex rounded-lg bg-slate-100 p-0.5 text-[11px] font-bold">
+                      <button
+                        type="button"
+                        onClick={() => setManualPickTypeFilter('all')}
+                        className={`rounded-md px-2 py-0.5 transition ${
+                          manualPickTypeFilter === 'all'
+                            ? 'bg-white text-[#1d5ca8] shadow-2xs'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        الكل
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setManualPickTypeFilter('mcq')}
+                        className={`rounded-md px-2 py-0.5 transition ${
+                          manualPickTypeFilter === 'mcq'
+                            ? 'bg-white text-[#1d5ca8] shadow-2xs'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        اختيار
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setManualPickTypeFilter('essay')}
+                        className={`rounded-md px-2 py-0.5 transition ${
+                          manualPickTypeFilter === 'essay'
+                            ? 'bg-white text-amber-800 shadow-2xs'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        مقالي
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Search by question text */}
+                  <div className="relative">
+                    <Search className="size-3.5 absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      type="text"
+                      placeholder="بحث في الأسئلة..."
+                      value={manualPickSearch}
+                      onChange={(e) => setManualPickSearch(e.target.value)}
+                      className="w-full sm:w-40 rounded-lg border border-slate-200 bg-white pr-7 pl-2 py-1 text-xs outline-hidden focus:border-[#1d5ca8]"
+                    />
+                  </div>
+                </div>
+
+                {/* Selected Questions Counter Badge */}
+                {(() => {
+                  const pool = matchingQuestions.length > 0 ? matchingQuestions : questions
+                  const selectedQuestionsList = pool.filter((q) => selectedQuestionIds.includes(q.id))
+                  const selectedMcqCount = selectedQuestionsList.filter((q) => q.type !== 'essay').length
+                  const selectedEssayCount = selectedQuestionsList.filter((q) => q.type === 'essay').length
+
+                  return (
+                    <div className="flex items-center justify-between rounded-xl bg-blue-50/70 px-3 py-1.5 text-xs font-bold text-[#153b68]">
+                      <span>
+                        تم تحديد: {selectedMcqCount} اختيار من متعدد + {selectedEssayCount} مقالي = {selectedQuestionIds.length} سؤال
+                      </span>
+                      {selectedQuestionIds.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setSelectedQuestionIds([])}
+                          className="text-[11px] text-rose-600 hover:underline"
+                        >
+                          إلغاء التحديد
+                        </button>
+                      )}
+                    </div>
+                  )
+                })()}
+
+                {/* Questions List */}
+                <div className="max-h-56 overflow-y-auto rounded-xl border border-slate-200 p-2 text-xs space-y-1.5">
                   {(() => {
                     const pool = matchingQuestions.length > 0 ? matchingQuestions : questions
                     const listToRender = pool.filter((q) => {
-                      if (manualPickLessonFilter === 'all') return true
-                      const l = q.lesson || extractLessonFromTopic(q.topic) || 'عام / بدون درس محدد'
-                      return l === manualPickLessonFilter
+                      if (manualPickLessonFilter !== 'all') {
+                        const l = q.lesson || extractLessonFromTopic(q.topic) || 'عام / بدون درس محدد'
+                        if (l !== manualPickLessonFilter) return false
+                      }
+                      if (manualPickTypeFilter === 'mcq' && q.type === 'essay') return false
+                      if (manualPickTypeFilter === 'essay' && q.type !== 'essay') return false
+                      if (manualPickSearch.trim()) {
+                        const cleanBody = q.body.toLowerCase()
+                        const term = manualPickSearch.trim().toLowerCase()
+                        if (!cleanBody.includes(term)) return false
+                      }
+                      return true
                     })
+
+                    if (listToRender.length === 0) {
+                      return (
+                        <p className="text-center py-6 text-xs font-bold text-slate-400">
+                          لا توجد أسئلة تطابق معايير التصفية والبحث الحالية.
+                        </p>
+                      )
+                    }
 
                     return listToRender.map((q) => {
                       const isChecked = selectedQuestionIds.includes(q.id)
                       const qLesson = q.lesson || extractLessonFromTopic(q.topic)
+                      const isEssay = q.type === 'essay'
 
                       return (
                         <label
                           key={q.id}
-                          className="flex items-start gap-2 rounded-lg p-2 hover:bg-slate-50 cursor-pointer border border-transparent hover:border-slate-200"
+                          className={`flex items-start gap-2.5 rounded-xl p-2.5 transition cursor-pointer border ${
+                            isChecked
+                              ? 'border-[#1d5ca8]/60 bg-blue-50/40 shadow-xs'
+                              : 'border-transparent hover:border-slate-200 hover:bg-slate-50'
+                          }`}
                         >
                           <input
                             type="checkbox"
@@ -854,19 +1282,28 @@ export function ExamsView({
                                 setSelectedQuestionIds((prev) => prev.filter((id) => id !== q.id))
                               }
                             }}
-                            className="mt-1"
+                            className="mt-1 size-4 rounded text-[#1d5ca8]"
                           />
                           <div className="min-w-0 flex-1">
-                            <MathRenderer text={q.body} as="p" className="font-semibold text-slate-800" />
-                            <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500 font-semibold">
-                              <span className="rounded bg-slate-100 px-1.5 py-0.5">{q.grade}</span>
+                            <MathRenderer text={q.body} as="p" className="font-semibold text-slate-800 text-xs" />
+                            <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[10px] font-semibold">
+                              <span
+                                className={`rounded px-1.5 py-0.5 border ${
+                                  isEssay
+                                    ? 'bg-amber-50 text-amber-800 border-amber-200'
+                                    : 'bg-blue-50 text-[#1d5ca8] border-blue-200'
+                                }`}
+                              >
+                                {isEssay ? 'سؤال مقالي' : 'اختيار من متعدد'}
+                              </span>
+                              <span className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-600">{q.grade}</span>
                               {qLesson && (
                                 <span className="rounded bg-emerald-50 text-emerald-800 px-1.5 py-0.5 border border-emerald-200/60">
                                   📖 {qLesson}
                                 </span>
                               )}
-                              <span className="rounded bg-blue-50 text-[#1d5ca8] px-1.5 py-0.5">
-                                {q.marks} درجة
+                              <span className="rounded bg-slate-100 text-slate-700 px-1.5 py-0.5">
+                                {q.marks} {q.marks === 1 ? 'درجة' : 'درجات'}
                               </span>
                             </div>
                           </div>
