@@ -9,6 +9,10 @@ import {
   gradeExamSubmissionsBatch,
   generateTeacherExamReport,
 } from '../lib/ai-grader.js'
+import {
+  normalizeRawPowers,
+  cleanGeminiArtifacts,
+} from '../components/ui/math-renderer.js'
 
 let totalTests = 0
 let passedTests = 0
@@ -219,6 +223,42 @@ async function runTests() {
     assert(report.highest_score >= report.lowest_score, 'Highest score >= Lowest score')
     assert(report.strengths.length > 0, 'Report includes student strengths')
     assert(report.recommendations_for_teacher.length > 0, 'Report includes actionable recommendations for teacher')
+  }
+
+  // ----------------------------------------------------------------
+  // Test Suite 5: Mathematical Powers Normalization (x^2, Unicode Exponents, Polynomials)
+  // ----------------------------------------------------------------
+  console.log('\nTest Suite 5: Mathematical Powers Normalization (x^2 & Exponents)')
+  {
+    // 1. Raw simple powers
+    assert(normalizeRawPowers('x^2') === '$x^2$', 'Normalizes bare "x^2" to "$x^2$"')
+    assert(normalizeRawPowers('X^2') === '$X^2$', 'Normalizes bare "X^2" to "$X^2$"')
+    assert(normalizeRawPowers('2^3') === '$2^3$', 'Normalizes bare "2^3" to "$2^3$"')
+    assert(normalizeRawPowers('10^-3') === '$10^-3$', 'Normalizes bare "10^-3" to "$10^-3$"')
+
+    // 2. Polynomial expressions (entire option)
+    assert(normalizeRawPowers('X^2 - 4X + 4') === '$X^2 - 4X + 4$', 'Normalizes polynomial "X^2 - 4X + 4" to single KaTeX block')
+    assert(normalizeRawPowers('x^2 - 4') === '$x^2 - 4$', 'Normalizes "x^2 - 4" to "$x^2 - 4$"')
+
+    // 3. Unicode superscripts (e.g. x², 10⁻³, (x-2)²)
+    assert(normalizeRawPowers('x²') === '$x^2$', 'Converts unicode superscript "x²" to "$x^2$"')
+    assert(normalizeRawPowers('(x - 2)²') === '$(x - 2)^2$', 'Converts unicode "(x - 2)²" to "$(x - 2)^2$"')
+    assert(normalizeRawPowers('10⁻³') === '$10^{-3}$', 'Converts unicode "10⁻³" to "$10^{-3}$"')
+
+    // 4. Spaces around carat
+    assert(normalizeRawPowers('x ^ 2') === '$x^2$', 'Removes spaces around carat "x ^ 2" -> "$x^2$"')
+
+    // 5. Mixed Arabic text with embedded powers
+    const arabicQuestion = 'أيٌّ من التعبيرات الآتية يمثل مفكوك المقدار (X - 2)^2؟'
+    const normalizedArabic = normalizeRawPowers(arabicQuestion)
+    assert(normalizedArabic.includes('$(X - 2)^2$'), 'Wraps embedded power in Arabic sentence without breaking surrounding text')
+
+    // 6. Already wrapped math blocks (should not double wrap)
+    assert(normalizeRawPowers('$x^2$') === '$x^2$', 'Preserves already wrapped "$x^2$" without double wrapping')
+    assert(normalizeRawPowers('$$\\frac{a}{b}$$') === '$$\\frac{a}{b}$$', 'Preserves display math blocks')
+
+    // 7. cleanGeminiArtifacts integration
+    assert(cleanGeminiArtifacts('X² - 4X + 4') === '$X^2 - 4X + 4$', 'cleanGeminiArtifacts handles raw powers and unicode')
   }
 
   console.log('\n====================================================')

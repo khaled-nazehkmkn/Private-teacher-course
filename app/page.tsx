@@ -1240,6 +1240,48 @@ export default function TeacherAppPage() {
     )
   }
 
+  const handleBatchUpdateQuestionMarks = async (
+    updates: { ids: string[]; marks: number }[]
+  ) => {
+    const supabase = createClient()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (user) {
+      for (const update of updates) {
+        if (!update.ids || update.ids.length === 0) continue
+        const numericMarks = Math.max(0.5, Number(update.marks) || 1)
+        for (let i = 0; i < update.ids.length; i += 100) {
+          const chunk = update.ids.slice(i, i + 100)
+          const { error } = await supabase
+            .from('questions')
+            .update({ marks: numericMarks })
+            .eq('teacher_id', user.id)
+            .in('id', chunk)
+
+          if (error) {
+            console.error('[BatchUpdateQuestionMarks] Error:', error)
+            throw new Error(error.message || 'فشل التعديل الجماعي لدرجات الأسئلة')
+          }
+        }
+      }
+      await loadData()
+      return
+    }
+
+    setQuestions((prev) =>
+      prev.map((q) => {
+        for (const u of updates) {
+          if (u.ids.includes(q.id)) {
+            return { ...q, marks: Math.max(0.5, Number(u.marks) || 1) }
+          }
+        }
+        return q
+      })
+    )
+  }
+
   const handleUploadImage = async (fileBlob: Blob, fileName: string): Promise<string> => {
     try {
       const formData = new FormData()
@@ -1715,6 +1757,7 @@ export default function TeacherAppPage() {
               onBatchAddQuestions={handleBatchAddQuestions}
               onDeleteQuestion={handleDeleteQuestion}
               onUpdateQuestion={handleUpdateQuestion}
+              onBatchUpdateQuestionMarks={handleBatchUpdateQuestionMarks}
               onUploadImage={handleUploadImage}
               teacherStatus={teacherStatus}
             />

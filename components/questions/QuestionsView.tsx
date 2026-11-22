@@ -21,6 +21,7 @@ import {
   Users,
   BookMarked,
   Edit3,
+  SlidersHorizontal,
 } from 'lucide-react'
 import { Modal } from '@/components/ui/modal'
 import { compressImage } from '@/lib/image-compress'
@@ -103,6 +104,11 @@ export const AI_PROMPT_TEMPLATE = String.raw`أنت معلم ومصمم اختب
    - "true_false": لأسئلة الصواب والخطأ. "options" تكون دائماً ["صواب", "خطأ"] (أو ["True", "False"] للإنجليزية)، و "correct" يكون دائماً [0] إذا كانت العبارة صحيحة، أو [1] إذا كانت العبارة خاطئة.
    - "essay": للأسئلة المقالية، مسائل الإثبات، أوجد الناتج، أو الأسئلة التي تتطلب خطوات حل. "options" مصفوفة فارغة []، و "correct" مصفوفة فارغة []، ويجب كتابة خطوات الحل الكاملة بالتفصيل والناتج النهائي في حقل "model_answer".
 4. قواعد تنسيق المعادلات الرياضية (KaTeX) داخل JSON — حرجة جداً:
+   - الأسس والقوى الرياضية (Powers & Exponents - إرشادات وأمثلة إلزامية):
+     * اكتب كل متغير أو رقم مرفوع لأس داخل علامتي دولار $...$ باستخدام علامة الـ Carat (^) هكذا: "$x^2$" و "$X^2$" و "$2^3$" و "$10^5$" و "$(X - 2)^2$" و "$10^{-3}$" و "$x^{2n}$".
+     * ممنوع منعاً باتاً كتابة الأسس كنص عادي مكشوف بدون $...$ مثل: "x^2" أو "X^2" أو "2^3" أو "(x-2)^2"؛ لضمان معالجتها وتنسيقها بشكل جمالي عبر مكتبة KaTeX بدلاً من نص عادي مشوه.
+     * ممنوع استخدام أرقام الأسس المرتفعة النصية (Unicode Superscript) مثل: x² أو X³ أو 2⁴ أو 10⁻³؛ استبدلها دائماً بصيغة "$x^2$" و "$X^3$" و "$2^4$" و "$10^{-3}$".
+     * المقادير الجبرية وكثيرات الحدود (Polynomials): إذا كان السؤال أو الخيار عبارة عن مقدار كامل يحتوي على أسس (مثال: x^2 - 4x + 4 أو x^2 + 5x + 6 = 0 أو y = 2x^2 + 1)، ضع المقدار بالكامل داخل علامتي دولار هكذا: "$x^2 - 4x + 4$" و "$x^2 + 5x + 6 = 0$"، ولا تضع الدولار حول x^2 بمفردها، حتى تعرض المعادلة كوحدة رياضية متناسقة ومرتبة بدقة من اليسار إلى اليمين دون حدوث أي انقلاب في اتجاه النصوص.
    - يجب إحاطة **كل** تعبير أو رمز أو متغير أو أس أو جذر أو كسر أو متباينة أو معادلة رياضية بعلامتي دولار $...$ في "body" و "options" و "model_answer" (سواء كانت الأسئلة بالعربية أو بالإنجليزية Math / Science، وبشكل خاص في خطوات الإثبات والحل داخل "model_answer").
    - أمثلة صحيحة: "$X^2$"، "$x^2 + 5x + 6 = 0$"، "$x_1, x_2$"، "$\\frac{a}{b}$"، "$\\geq$"، "$\\leq$"، "$\\implies$"، "$\\sqrt{x}$"، "$\\sqrt{X + 5}$"، "$\\sqrt[3]{8}$"، "$10^{-3}$".
    - الكسور والمتباينات والخطوات الإنجليزية (مهم جداً): أي كسر "\\frac{...}{...}" أو متباينة "\\geq" / "\\leq" / "\\neq" أو أقواس "\\left(...\\right)" أو سهم استنتاج "\\implies" يجب أن يكون **دائماً داخل "$...$"**. ممنوع منعاً باتاً كتابة أوامر LaTeX مكشوفة بدون "$...$" مثل: "Since \\left(\\frac{a - b}{2}\\right)^2 \\geq 0" أو "a - b = 0 \\implies a = b"؛ الصحيح دائماً هو وضعها داخل "$...$" هكذا: "Since $\\left(\\frac{a - b}{2}\\right)^2 \\geq 0$ and $\\sqrt{\\frac{a^2 + b^2}{2}} \\geq \\frac{a + b}{2}$, equality holds when $a - b = 0 \\implies a = b$.".
@@ -144,6 +150,7 @@ interface Props {
   onBatchAddQuestions: (qList: Omit<QuestionBankItem, 'id'>[]) => Promise<void>
   onDeleteQuestion: (id: string) => Promise<void>
   onUpdateQuestion?: (id: string, q: Partial<QuestionBankItem>) => Promise<void>
+  onBatchUpdateQuestionMarks?: (updates: { ids: string[]; marks: number }[]) => Promise<void>
   onUploadImage?: (file: Blob, fileName: string) => Promise<string>
   teacherStatus: TeacherStatus
 }
@@ -155,6 +162,7 @@ export function QuestionsView({
   onBatchAddQuestions,
   onDeleteQuestion,
   onUpdateQuestion,
+  onBatchUpdateQuestionMarks,
   onUploadImage,
   teacherStatus,
 }: Props) {
@@ -184,6 +192,16 @@ export function QuestionsView({
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null)
   const [existingImagePath, setExistingImagePath] = useState<string | null>(null)
   const [loadingAdd, setLoadingAdd] = useState(false)
+
+  // Bulk update marks modal state
+  const [bulkMarksModalOpen, setBulkMarksModalOpen] = useState(false)
+  const [bulkScope, setBulkScope] = useState<'all' | 'filtered'>('all')
+  const [bulkUpdateMcq, setBulkUpdateMcq] = useState(true)
+  const [bulkMcqMarks, setBulkMcqMarks] = useState(1)
+  const [bulkUpdateEssay, setBulkUpdateEssay] = useState(true)
+  const [bulkEssayMarks, setBulkEssayMarks] = useState(3)
+  const [savingBulkMarks, setSavingBulkMarks] = useState(false)
+  const [bulkSuccessMsg, setBulkSuccessMsg] = useState<string | null>(null)
 
   // Open modal for adding new question
   const handleOpenAdd = () => {
@@ -305,6 +323,88 @@ export function QuestionsView({
     const matchesLesson = lessonFilter === 'all' || qLesson === lessonFilter
     return matchesSearch && matchesGrade && matchesGroup && matchesLesson
   })
+
+  // Target questions & counts for bulk marks updating
+  const targetQuestionsForBulk = React.useMemo(() => {
+    return bulkScope === 'filtered' ? filteredQuestions : questions
+  }, [bulkScope, filteredQuestions, questions])
+
+  const bulkMcqQuestions = React.useMemo(() => {
+    return targetQuestionsForBulk.filter((q) => q.type !== 'essay')
+  }, [targetQuestionsForBulk])
+
+  const bulkEssayQuestions = React.useMemo(() => {
+    return targetQuestionsForBulk.filter((q) => q.type === 'essay')
+  }, [targetQuestionsForBulk])
+
+  const totalAffectedQuestions =
+    (bulkUpdateMcq ? bulkMcqQuestions.length : 0) +
+    (bulkUpdateEssay ? bulkEssayQuestions.length : 0)
+
+  const handleOpenBulkMarksModal = () => {
+    setBulkScope('all')
+    setBulkUpdateMcq(true)
+    setBulkMcqMarks(1)
+    setBulkUpdateEssay(true)
+    setBulkEssayMarks(3)
+    setBulkSuccessMsg(null)
+    setBulkMarksModalOpen(true)
+  }
+
+  const handleBulkUpdateMarks = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!teacherStatus.isActive) {
+      alert('حسابك غير نشط حالياً أو في وضع القراءة فقط.')
+      return
+    }
+
+    if (!bulkUpdateMcq && !bulkUpdateEssay) {
+      alert('يرجى اختيار نوع سؤال واحد على الأقل لتحديث درجته.')
+      return
+    }
+
+    if (totalAffectedQuestions === 0) {
+      alert('لا توجد أسئلة متطابقة في النطاق المحدد لتحديث درجاتها.')
+      return
+    }
+
+    const updates: { ids: string[]; marks: number }[] = []
+    if (bulkUpdateMcq && bulkMcqQuestions.length > 0) {
+      updates.push({
+        ids: bulkMcqQuestions.map((q) => q.id),
+        marks: Math.max(0.5, Number(bulkMcqMarks) || 1),
+      })
+    }
+    if (bulkUpdateEssay && bulkEssayQuestions.length > 0) {
+      updates.push({
+        ids: bulkEssayQuestions.map((q) => q.id),
+        marks: Math.max(0.5, Number(bulkEssayMarks) || 1),
+      })
+    }
+
+    setSavingBulkMarks(true)
+    try {
+      if (onBatchUpdateQuestionMarks) {
+        await onBatchUpdateQuestionMarks(updates)
+      } else if (onUpdateQuestion) {
+        for (const update of updates) {
+          for (const id of update.ids) {
+            await onUpdateQuestion(id, { marks: update.marks })
+          }
+        }
+      }
+      setBulkSuccessMsg(`تم تحديث درجات ${totalAffectedQuestions} سؤال بنجاح! ✓`)
+      setTimeout(() => {
+        setBulkSuccessMsg(null)
+        setBulkMarksModalOpen(false)
+      }, 1400)
+    } catch (err: any) {
+      console.error('Failed to bulk update marks:', err)
+      alert(err.message || 'حدث خطأ أثناء التعديل الجماعي لدرجات الأسئلة')
+    } finally {
+      setSavingBulkMarks(false)
+    }
+  }
 
   // Submit Single Question (Add or Update)
   const handleManualSubmit = async (e: React.FormEvent) => {
@@ -511,6 +611,17 @@ export function QuestionsView({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={handleOpenBulkMarksModal}
+            disabled={!teacherStatus.isActive || questions.length === 0}
+            className="inline-flex items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50/70 px-3.5 py-2.5 text-xs font-bold text-indigo-700 shadow-xs hover:bg-indigo-100 disabled:opacity-50 transition active:scale-95"
+            title="تعديل درجات أسئلة الاختيار أو المقالي دفعة واحدة"
+          >
+            <SlidersHorizontal className="size-4 text-indigo-600" />
+            <span>تعديل جماعي للدرجات</span>
+          </button>
+
           <button
             onClick={() => setImportModalOpen(true)}
             disabled={!teacherStatus.isActive}
@@ -806,9 +917,35 @@ export function QuestionsView({
           {/* Conditional: MCQ Options vs Essay Model Answer */}
           {questionType === 'mcq' ? (
             <div className="space-y-2">
-              <label className="block text-xs font-bold text-slate-700">
-                خيارات الإجابة (حدد الإجابة الصحيحة):
-              </label>
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-bold text-slate-700">
+                  خيارات الإجابة (حدد الإجابة الصحيحة):
+                </label>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOptions(['صواب', 'خطأ'])
+                      setCorrectIdx(0)
+                    }}
+                    className="rounded-lg bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-600 hover:bg-slate-200 transition"
+                    title="تعبئة الخيارات بنمط صواب وخطأ"
+                  >
+                    نمط صواب / خطأ
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOptions(['', '', '', ''])
+                      setCorrectIdx(0)
+                    }}
+                    className="rounded-lg bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-600 hover:bg-slate-200 transition"
+                    title="إعادة ضبط لـ 4 خيارات"
+                  >
+                    4 خيارات
+                  </button>
+                </div>
+              </div>
               {options.map((opt, idx) => (
                 <div key={idx} className="flex items-center gap-2">
                   <input
@@ -1287,6 +1424,250 @@ export function QuestionsView({
             </div>
           )}
         </div>
+      </Modal>
+
+      {/* Bulk Update Question Marks Modal */}
+      <Modal
+        isOpen={bulkMarksModalOpen}
+        onClose={() => !savingBulkMarks && setBulkMarksModalOpen(false)}
+        title="تعديل جماعي لدرجات الأسئلة في بنك الأسئلة"
+        maxWidth="max-w-xl"
+      >
+        <form onSubmit={handleBulkUpdateMarks} className="space-y-5 text-right">
+          {/* Info Banner */}
+          <div className="flex items-start gap-2.5 rounded-xl bg-blue-50/80 p-3.5 border border-blue-200/70 text-xs text-[#153b68]">
+            <SlidersHorizontal className="size-4 shrink-0 text-[#1d5ca8] mt-0.5" />
+            <p className="leading-relaxed">
+              تتيح لك هذه الميزة توحيد وتعديل درجات الأسئلة حسب نوعها دفعة واحدة (مثلاً: جعل كافة أسئلة الاختيار من متعدد بدرجة 1، وجميع الأسئلة المقالية بـ 3 درجات).
+            </p>
+          </div>
+
+          {/* Scope Selector */}
+          <div>
+            <label className="mb-2 block text-xs font-bold text-slate-700">
+              نطاق الأسئلة المراد تعديل درجاتها:
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <label
+                className={`flex cursor-pointer items-center justify-between rounded-xl border p-3 text-xs font-bold transition ${
+                  bulkScope === 'all'
+                    ? 'border-[#1d5ca8] bg-blue-50/50 text-[#1d5ca8] shadow-2xs'
+                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="bulkScope"
+                    checked={bulkScope === 'all'}
+                    onChange={() => setBulkScope('all')}
+                    className="size-4 text-[#1d5ca8]"
+                  />
+                  <span>كافة أسئلة البنك</span>
+                </div>
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-600">
+                  {questions.length} سؤال
+                </span>
+              </label>
+
+              <label
+                className={`flex cursor-pointer items-center justify-between rounded-xl border p-3 text-xs font-bold transition ${
+                  bulkScope === 'filtered'
+                    ? 'border-[#1d5ca8] bg-blue-50/50 text-[#1d5ca8] shadow-2xs'
+                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="bulkScope"
+                    checked={bulkScope === 'filtered'}
+                    onChange={() => setBulkScope('filtered')}
+                    className="size-4 text-[#1d5ca8]"
+                  />
+                  <span>حسب الفلتر الحالي</span>
+                </div>
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-600">
+                  {filteredQuestions.length} سؤال
+                </span>
+              </label>
+            </div>
+            {bulkScope === 'filtered' && (
+              <p className="mt-1.5 text-[11px] text-slate-500">
+                الفلاتر المطبقة: المرحلة: ({gradeFilter === 'all' ? 'الكل' : gradeFilter}) | المجموعة: ({groupFilter === 'all' ? 'الكل' : groupFilter}) | الدرس: ({lessonFilter === 'all' ? 'الكل' : lessonFilter})
+              </p>
+            )}
+          </div>
+
+          {/* Types Configuration */}
+          <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50/50 p-4">
+            <h4 className="text-xs font-bold text-slate-700 mb-2">تحديد الدرجة المطلوبة لكل نوع:</h4>
+
+            {/* MCQ & True/False */}
+            <div className="rounded-xl border border-slate-200 bg-white p-3.5 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-800">
+                  <input
+                    type="checkbox"
+                    checked={bulkUpdateMcq}
+                    onChange={(e) => setBulkUpdateMcq(e.target.checked)}
+                    className="size-4 rounded text-[#1d5ca8]"
+                  />
+                  <span>أسئلة الاختيار من متعدد والصواب والخطأ</span>
+                </label>
+                <span className="rounded-md bg-blue-50 px-2 py-0.5 text-[11px] font-bold text-[#1d5ca8]">
+                  {bulkMcqQuestions.length} سؤال متوفر
+                </span>
+              </div>
+
+              {bulkUpdateMcq && (
+                <div className="flex items-center gap-3 pt-1 border-t border-slate-100">
+                  <span className="text-xs font-semibold text-slate-600">الدرجة الجديدة:</span>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="number"
+                      step="0.5"
+                      min="0.5"
+                      max="100"
+                      required={bulkUpdateMcq}
+                      value={bulkMcqMarks}
+                      onChange={(e) => setBulkMcqMarks(Math.max(0.5, Number(e.target.value)))}
+                      className="w-20 rounded-xl border border-slate-200 px-3 py-1.5 text-center text-xs font-bold outline-hidden focus:border-[#1d5ca8]"
+                    />
+                    <span className="text-xs text-slate-400">درجة</span>
+                  </div>
+                  <div className="flex items-center gap-1 mr-auto">
+                    {[1, 2, 3].map((val) => (
+                      <button
+                        key={val}
+                        type="button"
+                        onClick={() => setBulkMcqMarks(val)}
+                        className={`rounded-lg px-2 py-1 text-xs font-bold transition ${
+                          bulkMcqMarks === val
+                            ? 'bg-[#1d5ca8] text-white'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        {val}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Essay Questions */}
+            <div className="rounded-xl border border-slate-200 bg-white p-3.5 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-800">
+                  <input
+                    type="checkbox"
+                    checked={bulkUpdateEssay}
+                    onChange={(e) => setBulkUpdateEssay(e.target.checked)}
+                    className="size-4 rounded text-amber-600"
+                  />
+                  <span>الأسئلة المقالية ومسائل الخطوات</span>
+                </label>
+                <span className="rounded-md bg-amber-50 px-2 py-0.5 text-[11px] font-bold text-amber-800">
+                  {bulkEssayQuestions.length} سؤال متوفر
+                </span>
+              </div>
+
+              {bulkUpdateEssay && (
+                <div className="flex items-center gap-3 pt-1 border-t border-slate-100">
+                  <span className="text-xs font-semibold text-slate-600">الدرجة الجديدة:</span>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="number"
+                      step="0.5"
+                      min="0.5"
+                      max="100"
+                      required={bulkUpdateEssay}
+                      value={bulkEssayMarks}
+                      onChange={(e) => setBulkEssayMarks(Math.max(0.5, Number(e.target.value)))}
+                      className="w-20 rounded-xl border border-slate-200 px-3 py-1.5 text-center text-xs font-bold outline-hidden focus:border-amber-500"
+                    />
+                    <span className="text-xs text-slate-400">درجات</span>
+                  </div>
+                  <div className="flex items-center gap-1 mr-auto">
+                    {[2, 3, 4, 5].map((val) => (
+                      <button
+                        key={val}
+                        type="button"
+                        onClick={() => setBulkEssayMarks(val)}
+                        className={`rounded-lg px-2 py-1 text-xs font-bold transition ${
+                          bulkEssayMarks === val
+                            ? 'bg-amber-600 text-white'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        {val}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Live Impact Summary */}
+          <div className="rounded-xl border border-indigo-100 bg-indigo-50/50 p-3.5 text-xs text-indigo-900 space-y-1">
+            <p className="font-bold flex items-center gap-1.5">
+              <span>ملخص التعديل:</span>
+            </p>
+            <ul className="list-disc list-inside space-y-0.5 text-slate-700 text-[11px]">
+              {bulkUpdateMcq && bulkMcqQuestions.length > 0 && (
+                <li>
+                  سيتم تعديل درجات <strong>{bulkMcqQuestions.length}</strong> سؤال اختيار من متعدد لتصبح <strong>{bulkMcqMarks}</strong> درجة.
+                </li>
+              )}
+              {bulkUpdateEssay && bulkEssayQuestions.length > 0 && (
+                <li>
+                  سيتم تعديل درجات <strong>{bulkEssayQuestions.length}</strong> سؤال مقالي لتصبح <strong>{bulkEssayMarks}</strong> درجات.
+                </li>
+              )}
+              {totalAffectedQuestions === 0 && (
+                <li className="text-amber-700">لا توجد أسئلة محددة للتعديل في النطاق المختار.</li>
+              )}
+            </ul>
+          </div>
+
+          {bulkSuccessMsg && (
+            <div className="flex items-center gap-2 rounded-xl bg-emerald-50 border border-emerald-200 p-3 text-xs font-bold text-emerald-800 animate-in fade-in">
+              <CheckCircle2 className="size-4 shrink-0 text-emerald-600" />
+              <span>{bulkSuccessMsg}</span>
+            </div>
+          )}
+
+          {/* Form Actions */}
+          <div className="flex items-center justify-end gap-2 pt-2">
+            <button
+              type="button"
+              disabled={savingBulkMarks}
+              onClick={() => setBulkMarksModalOpen(false)}
+              className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+            >
+              إلغاء
+            </button>
+            <button
+              type="submit"
+              disabled={savingBulkMarks || totalAffectedQuestions === 0 || (!bulkUpdateMcq && !bulkUpdateEssay)}
+              className="inline-flex items-center gap-2 rounded-xl bg-[#1d5ca8] px-5 py-2 text-xs font-bold text-white shadow-md hover:bg-[#164e93] disabled:opacity-50 transition active:scale-95"
+            >
+              {savingBulkMarks ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" />
+                  <span>جاري تحديث الدرجات...</span>
+                </>
+              ) : (
+                <>
+                  <Check className="size-4" />
+                  <span>تأكيد وتطبيق التعديل ({totalAffectedQuestions} سؤال)</span>
+                </>
+              )}
+            </button>
+          </div>
+        </form>
       </Modal>
 
       {/* Full-Screen Preview Modal for Question Images */}

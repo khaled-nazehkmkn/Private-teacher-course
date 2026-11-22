@@ -3,6 +3,84 @@
 import React, { useMemo } from 'react'
 import katex from 'katex'
 
+export const UNICODE_SUPERSCRIPTS_MAP: Record<string, string> = {
+  '⁰': '0',
+  '¹': '1',
+  '²': '2',
+  '³': '3',
+  '⁴': '4',
+  '⁵': '5',
+  '⁶': '6',
+  '⁷': '7',
+  '⁸': '8',
+  '⁹': '9',
+  '⁺': '+',
+  '⁻': '-',
+  'ⁿ': 'n',
+  'ⁱ': 'i',
+}
+
+/**
+ * Normalizes unwrapped mathematical powers and unicode superscripts (e.g. x^2, x², 10⁻³, (x-2)^2)
+ * so they are rendered as proper KaTeX math formulas rather than broken text.
+ */
+export function normalizeRawPowers(raw: string): string {
+  if (!raw || typeof raw !== 'string') return ''
+
+  // 1. Convert Unicode superscripts after any operand e.g. x² -> x^2, (x-2)² -> (x-2)^2, 10⁻³ -> 10^{-3}
+  let text = raw.replace(
+    /([A-Za-z0-9\)\]\}])([⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻ⁿⁱ]+)/g,
+    (_, base, supers) => {
+      const converted = Array.from(supers as string)
+        .map((ch) => UNICODE_SUPERSCRIPTS_MAP[ch] || ch)
+        .join('')
+      return converted.length > 1 || converted.startsWith('-') || converted.startsWith('+')
+        ? `${base}^{${converted}}`
+        : `${base}^${converted}`
+    }
+  )
+
+  // 2. Fix spaces around carats e.g. "x ^ 2" -> "x^2", "(x - 1) ^ 3" -> "(x - 1)^3"
+  text = text.replace(
+    /([A-Za-z0-9\)\]\}])\s*\^\s*(\{?[A-Za-z0-9+\-_]+\}?)/g,
+    '$1^$2'
+  )
+
+  // 3. If an entire string (e.g. an MCQ option like "X^2 - 4X + 4" or "x^2") is a math expression with powers
+  // and has no $ delimiters, wrap the entire string in $...$
+  const trimmed = text.trim()
+  if (!trimmed.includes('$') && trimmed.includes('^')) {
+    // If it contains NO Arabic letters and is made of standard math tokens
+    if (
+      !/[\u0600-\u06FF]/.test(trimmed) &&
+      /^[-+*/=()<>[\]|&%:;,?!'"`a-zA-Z0-9\s._^{}\\√±≤≥≠]+$/.test(trimmed)
+    ) {
+      return `$${trimmed}$`
+    }
+  }
+
+  // 4. For mixed text (e.g. Arabic questions with unwrapped powers like "إذا كان المقدار x^2 - 4 يساوي..."):
+  // Split by existing math blocks ($$...$$, $...$, \(...\), \[...\])
+  const mathBlockRegex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\$[^\$\n]+?\$|\\\(.*?\\\))/g
+  const parts = text.split(mathBlockRegex)
+
+  for (let i = 0; i < parts.length; i += 2) {
+    let segment = parts[i]
+    if (!segment || !segment.includes('^')) continue
+
+    // Wrap bare power expressions or equations with powers:
+    // e.g. (X - 2)^2, x^2 - 4x + 4, x^2 = 25, 2^3, 10^{-3}
+    segment = segment.replace(
+      /(?<![$\w\\/])((?:\([A-Za-z0-9+\-*/.\s]+\)|[A-Za-z0-9]+)\^(?:\{[^{}]+\}|-?[A-Za-z0-9]+)(?:\s*[-+*/=<>≤≥≠]\s*(?:(?:\([A-Za-z0-9+\-*/.\s]+\)|[A-Za-z0-9]+)(?:\^(?:\{[^{}]+\}|-?[A-Za-z0-9]+))?|[A-Za-z0-9]+(?:\.[0-9]+)?))*)(?![$\w^])/g,
+      (match) => `$${match.trim()}$`
+    )
+
+    parts[i] = segment
+  }
+
+  return parts.join('')
+}
+
 /**
  * Strips Gemini / ChatGPT grounding citation span artifacts and fixes reversed negative numbers
  */
@@ -28,6 +106,9 @@ export function cleanGeminiArtifacts(raw: string): string {
   if (/^\s*(\d+(\.\d+)?)[-−]\s*$/.test(text)) {
     text = '-' + text.replace(/[-−]/, '').trim()
   }
+
+  // Normalize raw powers and unicode superscripts to proper KaTeX math
+  text = normalizeRawPowers(text)
 
   return text
 }
@@ -88,18 +169,31 @@ function extractBalancedGroup(
  */
 export function normalizeLatexMathContent(math: string): string {
   if (!math) return ''
+  // Normalize unicode superscripts inside math mode (e.g. $x²$ -> $x^2$)
+  let mathStr = math.replace(
+    /([A-Za-z0-9\)\]\}])([⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻ⁿⁱ]+)/g,
+    (_, base, supers) => {
+      const converted = Array.from(supers as string)
+        .map((ch) => UNICODE_SUPERSCRIPTS_MAP[ch] || ch)
+        .join('')
+      return converted.length > 1 || converted.startsWith('-') || converted.startsWith('+')
+        ? `${base}^{${converted}}`
+        : `${base}^${converted}`
+    }
+  )
+
   let out = ''
   let i = 0
 
-  while (i < math.length) {
-    const slice = math.slice(i)
+  while (i < mathStr.length) {
+    const slice = mathStr.slice(i)
     const cmdMatch = /^(?:(\\)?(sqrt|cbrt)\b|√)/i.exec(slice)
 
     if (cmdMatch) {
-      const prevChar = i > 0 ? math[i - 1] : ''
+      const prevChar = i > 0 ? mathStr[i - 1] : ''
       // Avoid matching inside identifiers like `my_sqrt`
       if (/[A-Za-z_]/.test(prevChar)) {
-        out += math[i]
+        out += mathStr[i]
         i += 1
         continue
       }
@@ -111,9 +205,9 @@ export function normalizeLatexMathContent(math: string): string {
 
       // Skip spaces between command and optional [n]
       let tempCursor = cursor
-      while (tempCursor < math.length && /\s/.test(math[tempCursor])) tempCursor++
-      if (math[tempCursor] === '[') {
-        const bracketGroup = extractBalancedGroup(math, tempCursor, '[', ']')
+      while (tempCursor < mathStr.length && /\s/.test(mathStr[tempCursor])) tempCursor++
+      if (mathStr[tempCursor] === '[') {
+        const bracketGroup = extractBalancedGroup(mathStr, tempCursor, '[', ']')
         if (bracketGroup) {
           optionalIndex = `[${normalizeLatexMathContent(bracketGroup.content)}]`
           cursor = bracketGroup.endIndex
@@ -124,17 +218,17 @@ export function normalizeLatexMathContent(math: string): string {
 
       // Skip spaces between command and argument
       let argStart = cursor
-      while (argStart < math.length && /\s/.test(math[argStart])) argStart++
+      while (argStart < mathStr.length && /\s/.test(mathStr[argStart])) argStart++
 
-      if (math[argStart] === '{') {
-        const braceGroup = extractBalancedGroup(math, argStart, '{', '}')
+      if (mathStr[argStart] === '{') {
+        const braceGroup = extractBalancedGroup(mathStr, argStart, '{', '}')
         if (braceGroup) {
           out += `\\sqrt${optionalIndex}{${normalizeLatexMathContent(braceGroup.content)}}`
           i = braceGroup.endIndex
           continue
         }
-      } else if (math[argStart] === '(') {
-        const parenGroup = extractBalancedGroup(math, argStart, '(', ')')
+      } else if (mathStr[argStart] === '(') {
+        const parenGroup = extractBalancedGroup(mathStr, argStart, '(', ')')
         if (parenGroup) {
           out += `\\sqrt${optionalIndex}{${normalizeLatexMathContent(parenGroup.content)}}`
           i = parenGroup.endIndex
@@ -143,7 +237,7 @@ export function normalizeLatexMathContent(math: string): string {
       } else {
         const tokenMatch =
           /^([A-Za-z0-9]+(?:\^(?:\{[^{}]+\}|-?[A-Za-z0-9]+)|_(?:\{[^{}]+\}|\d+))?)/.exec(
-            math.slice(argStart)
+            mathStr.slice(argStart)
           )
         if (tokenMatch) {
           out += `\\sqrt${optionalIndex}{${tokenMatch[1]}}`
@@ -158,7 +252,7 @@ export function normalizeLatexMathContent(math: string): string {
       continue
     }
 
-    out += math[i]
+    out += mathStr[i]
     i += 1
   }
 
@@ -481,9 +575,9 @@ export function MathRenderer({
 
     const renderBareMathSegments = (plainText: string): Segment[] => {
       if (!plainText) return []
-      // Matches unwrapped expressions like X^2, x^{2n}, (x - 2)^2, 10^{-3}, 180^\circ, or x_1 / a_{n}
+      // Matches unwrapped expressions like X^2, x^{2n}, (x - 2)^2, 10^{-3}, 180^\circ, x², or x_1 / a_{n}
       const barePowerOrSubRegex =
-        /(?:\([A-Za-z0-9+\-*/.\s]+\)|[A-Za-z0-9]+)(?:\^(?:\{[^{}]+\}|\\[A-Za-z]+|-?[A-Za-z0-9]+))+|\b[A-Za-z]_(?:\{[^{}]+\}|\d+)\b/g
+        /(?:\([A-Za-z0-9+\-*/.\s]+\)|[A-Za-z0-9]+)(?:\s*\^\s*(?:\{[^{}]+\}|\\[A-Za-z]+|-?[A-Za-z0-9]+)|[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻ⁿⁱ]+)+|\b[A-Za-z]_(?:\{[^{}]+\}|\d+)\b/g
 
       let cursor = 0
       const out: Segment[] = []
