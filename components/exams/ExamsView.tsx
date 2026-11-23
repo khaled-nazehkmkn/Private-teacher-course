@@ -92,6 +92,16 @@ interface Props {
   }) => Promise<void>
   onToggleResultsRelease: (examId: string, currentReleased: boolean) => Promise<void>
   onDeleteExam: (examId: string) => Promise<void>
+  onRepublishExam?: (data: {
+    examId: string
+    mode: 'reopen' | 'clone'
+    title?: string
+    opens_at: string | null
+    closes_at: string | null
+    duration_min: number
+    resetIncomplete?: boolean
+    hideResults?: boolean
+  }) => Promise<void>
   onFetchExamSubmissions: (examId: string) => Promise<ExamSubmissionDetail[]>
   onDeleteSubmission?: (submissionId: string) => Promise<void>
   onLogWhatsAppResult: (studentId: string, message: string) => Promise<void>
@@ -107,6 +117,7 @@ export function ExamsView({
   onCreateExam,
   onToggleResultsRelease,
   onDeleteExam,
+  onRepublishExam,
   onFetchExamSubmissions,
   onDeleteSubmission,
   onLogWhatsAppResult,
@@ -116,6 +127,18 @@ export function ExamsView({
   const [createModalOpen, setCreateModalOpen] = useState(false)
   const [qrModalOpen, setQrModalOpen] = useState(false)
   const [activeShareExam, setActiveShareExam] = useState<ExamItem | null>(null)
+
+  // Republish / Reopen Modal state
+  const [republishModalOpen, setRepublishModalOpen] = useState(false)
+  const [republishExam, setRepublishExam] = useState<ExamItem | null>(null)
+  const [republishMode, setRepublishMode] = useState<'reopen' | 'clone'>('reopen')
+  const [republishTitle, setRepublishTitle] = useState('')
+  const [republishOpensAt, setRepublishOpensAt] = useState('')
+  const [republishClosesAt, setRepublishClosesAt] = useState('')
+  const [republishDuration, setRepublishDuration] = useState(30)
+  const [republishResetIncomplete, setRepublishResetIncomplete] = useState(true)
+  const [republishHideResults, setRepublishHideResults] = useState(true)
+  const [savingRepublish, setSavingRepublish] = useState(false)
 
   // Results details modal state
   const [resultsModalOpen, setResultsModalOpen] = useState(false)
@@ -439,6 +462,98 @@ export function ExamsView({
     }
   }
 
+  // Handle Republish Exam Modal
+  const handleOpenRepublishModal = (exam: ExamItem) => {
+    setRepublishExam(exam)
+    setRepublishMode('reopen')
+    setRepublishTitle(`${exam.title} (إعادة للغائبين)`)
+    setRepublishDuration(exam.duration_min || 30)
+
+    const now = new Date()
+    const defaultClose = new Date(now.getTime() + 24 * 60 * 60 * 1000)
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const formatDT = (d: Date) =>
+      `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+
+    setRepublishOpensAt(formatDT(now))
+    setRepublishClosesAt(formatDT(defaultClose))
+    setRepublishResetIncomplete(true)
+    setRepublishHideResults(exam.results_released)
+    setRepublishModalOpen(true)
+  }
+
+  const setQuickCloseHours = (hours: number) => {
+    const base = republishOpensAt ? new Date(republishOpensAt) : new Date()
+    const target = new Date(base.getTime() + hours * 60 * 60 * 1000)
+    const pad = (n: number) => String(n).padStart(2, '0')
+    setRepublishClosesAt(
+      `${target.getFullYear()}-${pad(target.getMonth() + 1)}-${pad(target.getDate())}T${pad(target.getHours())}:${pad(target.getMinutes())}`
+    )
+  }
+
+  const setQuickCloseEndOfDay = () => {
+    const base = republishOpensAt ? new Date(republishOpensAt) : new Date()
+    const pad = (n: number) => String(n).padStart(2, '0')
+    setRepublishClosesAt(
+      `${base.getFullYear()}-${pad(base.getMonth() + 1)}-${pad(base.getDate())}T23:59`
+    )
+  }
+
+  const handleRepublishSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!republishExam) return
+    if (!teacherStatus.isActive) {
+      alert('حسابك غير نشط حالياً أو في وضع القراءة فقط.')
+      return
+    }
+
+    if (republishClosesAt && republishOpensAt) {
+      if (new Date(republishClosesAt) <= new Date(republishOpensAt)) {
+        alert('يجب أن يكون موعد إغلاق الاختبار بعد موعد فتحه.')
+        return
+      }
+    }
+
+    setSavingRepublish(true)
+    try {
+      if (onRepublishExam) {
+        await onRepublishExam({
+          examId: republishExam.id,
+          mode: republishMode,
+          title: republishTitle,
+          opens_at: republishOpensAt || null,
+          closes_at: republishClosesAt || null,
+          duration_min: republishDuration,
+          resetIncomplete: republishResetIncomplete,
+          hideResults: republishHideResults,
+        })
+      } else if (republishMode === 'clone') {
+        await onCreateExam({
+          title: republishTitle,
+          group_id: republishExam.group_id,
+          grade: republishExam.grade,
+          duration_min: republishDuration,
+          opens_at: republishOpensAt || null,
+          closes_at: republishClosesAt || null,
+          shuffle: republishExam.shuffle,
+          question_ids: republishExam.question_ids,
+        })
+      }
+
+      alert(
+        republishMode === 'reopen'
+          ? 'تم تمديد وإعادة فتح الاختبار بنجاح! يستطيع الطلاب الذين فاتهم الاختبار الدخول وحله الآن بكودهم الحالي.'
+          : 'تم نشر نسخة جديدة من الاختبار بنفس الأسئلة بنجاح!'
+      )
+      setRepublishModalOpen(false)
+    } catch (err: any) {
+      console.error('Error republishing exam:', err)
+      alert(err?.message || 'فشل إعادة نشر الاختبار')
+    } finally {
+      setSavingRepublish(false)
+    }
+  }
+
   // Handle Create Exam
   const handleCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -632,17 +747,40 @@ export function ExamsView({
         {exams.map((exam) => {
           const shareUrl = `${originUrl}/exam/${exam.public_token}`
           const grp = groups.find((g) => g.id === exam.group_id)
+          const now = new Date()
+          const isEnded = Boolean(exam.closes_at && new Date(exam.closes_at) < now)
+          const isUpcoming = Boolean(exam.opens_at && new Date(exam.opens_at) > now)
 
           return (
             <div
               key={exam.id}
-              className="flex min-w-0 flex-col justify-between overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 sm:p-5 shadow-xs transition hover:border-[#1d5ca8]/40"
+              className={`flex min-w-0 flex-col justify-between overflow-hidden rounded-2xl border bg-white p-4 sm:p-5 shadow-xs transition hover:border-[#1d5ca8]/40 ${
+                isEnded ? 'border-slate-200/80 bg-slate-50/30' : 'border-slate-200'
+              }`}
             >
               <div className="min-w-0">
                 <div className="flex flex-wrap items-start justify-between gap-2">
-                  <span className="max-w-full break-words rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-bold text-slate-600">
-                    {grp?.name || exam.grade || 'عام'}
-                  </span>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="max-w-full break-words rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-bold text-slate-600">
+                      {grp?.name || exam.grade || 'عام'}
+                    </span>
+                    {isEnded ? (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 border border-rose-200 px-2 py-0.5 text-[10px] font-bold text-rose-700">
+                        <AlertCircle className="size-3" />
+                        منتهي
+                      </span>
+                    ) : isUpcoming ? (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 border border-amber-200 px-2 py-0.5 text-[10px] font-bold text-amber-700">
+                        <Clock className="size-3" />
+                        يبدأ قريباً
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+                        <CheckCircle2 className="size-3" />
+                        متاح حالياً
+                      </span>
+                    )}
+                  </div>
                   <div className="flex shrink-0 items-center gap-1">
                     <button
                       onClick={() => onToggleResultsRelease(exam.id, exam.results_released)}
@@ -676,7 +814,7 @@ export function ExamsView({
 
                 <h3 className="mt-3 break-words text-base font-extrabold text-slate-800">{exam.title}</h3>
 
-                <div className="mt-3 flex flex-wrap items-center gap-4 text-xs text-slate-500">
+                <div className="mt-3 flex flex-wrap items-center gap-3.5 text-xs text-slate-500">
                   <span className="flex items-center gap-1">
                     <Clock className="size-3.5 text-[#1d5ca8]" />
                     {exam.duration_min} دقيقة
@@ -685,6 +823,23 @@ export function ExamsView({
                     <Shuffle className="size-3.5 text-slate-400" />
                     {exam.shuffle ? 'ترتيب عشوائي' : 'ترتيب ثابت'}
                   </span>
+                  {exam.closes_at && (
+                    <span
+                      className={`flex items-center gap-1 ${
+                        isEnded ? 'font-bold text-rose-600' : 'text-slate-500'
+                      }`}
+                      title={new Date(exam.closes_at).toLocaleString('ar-EG')}
+                    >
+                      <Calendar className="size-3.5" />
+                      {isEnded ? 'انتهى في: ' : 'ينتهي: '}
+                      {new Date(exam.closes_at).toLocaleDateString('ar-EG', {
+                        month: 'short',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -699,6 +854,24 @@ export function ExamsView({
                 </button>
 
                 <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={() => handleOpenRepublishModal(exam)}
+                    disabled={!teacherStatus.isActive}
+                    className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-bold transition disabled:opacity-50 ${
+                      isEnded
+                        ? 'border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 shadow-2xs'
+                        : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'
+                    }`}
+                    title={
+                      isEnded
+                        ? 'إعادة فتح الاختبار أو تمديد وقته للطلاب الغائبين'
+                        : 'تعديل موعد الاختبار أو إعادة نشره'
+                    }
+                  >
+                    <RotateCcw className="size-3.5 text-indigo-600" />
+                    <span>{isEnded ? 'إعادة فتح للغائبين' : 'تمديد / إعادة نشر'}</span>
+                  </button>
+
                   <button
                     onClick={() => handleOpenPrintPdf(exam)}
                     className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-100"
@@ -1424,6 +1597,41 @@ export function ExamsView({
             </div>
           </div>
 
+          {/* Closed Exam Reopen Notification Banner */}
+          {selectedExamForResults?.closes_at &&
+            new Date(selectedExamForResults.closes_at) < new Date() && (
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl bg-amber-50/90 border border-amber-200 p-4 text-xs shadow-2xs">
+                <div className="flex items-start sm:items-center gap-2.5">
+                  <div className="rounded-xl bg-amber-100 p-2 text-amber-700 shrink-0">
+                    <Clock className="size-4" />
+                  </div>
+                  <div>
+                    <h5 className="font-bold text-amber-900">
+                      هذا الاختبار منتهي الصلاحية حالياً
+                    </h5>
+                    <p className="mt-0.5 text-amber-700 text-[11px] leading-relaxed">
+                      انتهى موعد استقبال الإجابات في{' '}
+                      {new Date(selectedExamForResults.closes_at).toLocaleString('ar-EG', {
+                        dateStyle: 'medium',
+                        timeStyle: 'short',
+                      })}
+                      . يمكنك تمديد موعده أو إعادة فتحه للطلاب الذين فاتهم الاختبار للدخول وحله بنفس الرابط والكود.
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleOpenRepublishModal(selectedExamForResults)}
+                  disabled={!teacherStatus.isActive}
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-indigo-600 px-3.5 py-2 text-xs font-bold text-white shadow-xs hover:bg-indigo-700 transition active:scale-95 disabled:opacity-50"
+                >
+                  <RotateCcw className="size-3.5" />
+                  <span>إعادة فتح الاختبار للغائبين</span>
+                </button>
+              </div>
+            )}
+
           {/* AI Auto-Grading & Analytics Banner */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-2xl bg-gradient-to-r from-blue-50/80 via-indigo-50/50 to-slate-50 border border-blue-200/70 p-4 shadow-2xs">
             <div className="flex items-start sm:items-center gap-3">
@@ -2106,6 +2314,242 @@ export function ExamsView({
             />
           </div>
         )}
+      </Modal>
+
+      {/* Republish / Reopen Exam Modal */}
+      <Modal
+        isOpen={republishModalOpen}
+        onClose={() => setRepublishModalOpen(false)}
+        title={
+          republishMode === 'reopen'
+            ? `إعادة فتح وتمديد موعد الاختبار: ${republishExam?.title || ''}`
+            : `إعادة نشر نسخة جديدة من الاختبار: ${republishExam?.title || ''}`
+        }
+        maxWidth="max-w-2xl"
+      >
+        <form onSubmit={handleRepublishSubmit} className="space-y-4">
+          {/* Mode Selector */}
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 space-y-2">
+            <label className="block text-xs font-bold text-slate-800">
+              اختر طريقة إعادة النشر:
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+              <label
+                className={`flex flex-col gap-1 rounded-xl border p-3 cursor-pointer transition ${
+                  republishMode === 'reopen'
+                    ? 'border-indigo-500 bg-white shadow-xs'
+                    : 'border-slate-200 bg-white/60 hover:bg-white'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="republishMode"
+                    value="reopen"
+                    checked={republishMode === 'reopen'}
+                    onChange={() => setRepublishMode('reopen')}
+                    className="size-4 text-indigo-600"
+                  />
+                  <span className="font-bold text-slate-900">
+                    تمديد وإعادة فتح هذا الاختبار
+                  </span>
+                  <span className="rounded-md bg-indigo-50 text-indigo-700 text-[10px] font-black px-1.5 py-0.5">
+                    موصى به للغائبين
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500 pr-6 leading-relaxed">
+                  يسمح للطلاب الذين فاتهم الاختبار بالدخول وحله بنفس الرابط والكود دون تغيير، مع الحفاظ على درجات الطلاب الذين سلموا بالفعل.
+                </p>
+              </label>
+
+              <label
+                className={`flex flex-col gap-1 rounded-xl border p-3 cursor-pointer transition ${
+                  republishMode === 'clone'
+                    ? 'border-indigo-500 bg-white shadow-xs'
+                    : 'border-slate-200 bg-white/60 hover:bg-white'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="republishMode"
+                    value="clone"
+                    checked={republishMode === 'clone'}
+                    onChange={() => setRepublishMode('clone')}
+                    className="size-4 text-indigo-600"
+                  />
+                  <span className="font-bold text-slate-900">
+                    نشر كنسخة جديدة منفصلة
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500 pr-6 leading-relaxed">
+                  نسخ نفس الأسئلة وإعداداتها في اختبار جديد برابط ورمز جديد وجدول نتائج مستقل تماماً.
+                </p>
+              </label>
+            </div>
+          </div>
+
+          {/* Title for clone mode */}
+          {republishMode === 'clone' && (
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-700">
+                عنوان النسخة الجديدة
+              </label>
+              <input
+                type="text"
+                required
+                value={republishTitle}
+                onChange={(e) => setRepublishTitle(e.target.value)}
+                placeholder="عنوان الاختبار الجديد..."
+                className="w-full rounded-xl border border-slate-200 p-2.5 text-xs outline-hidden focus:border-[#1d5ca8]"
+              />
+            </div>
+          )}
+
+          {/* Duration */}
+          <div>
+            <label className="mb-1 block text-xs font-bold text-slate-700">
+              مدة الاختبار بالدقائق
+            </label>
+            <input
+              type="number"
+              min="5"
+              max="180"
+              required
+              value={republishDuration}
+              onChange={(e) => setRepublishDuration(Number(e.target.value))}
+              className="w-full rounded-xl border border-slate-200 p-2.5 text-xs outline-hidden focus:border-[#1d5ca8]"
+            />
+          </div>
+
+          {/* Timing & DateTimePickers */}
+          <div className="space-y-3">
+            <DateTimePicker
+              label="موعد فتح الاختبار (تاريخ ووقت البدء)"
+              value={republishOpensAt}
+              onChange={setRepublishOpensAt}
+            />
+
+            <div>
+              <DateTimePicker
+                label="موعد إغلاق الاختبار (تاريخ ووقت الانتهاء الجديد)"
+                value={republishClosesAt}
+                onChange={setRepublishClosesAt}
+              />
+
+              {/* Quick Preset Buttons */}
+              <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px]">
+                <span className="font-bold text-slate-400">خيارات سريعة للموعد:</span>
+                <button
+                  type="button"
+                  onClick={() => setQuickCloseHours(2)}
+                  className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 font-bold text-slate-700 hover:bg-slate-100 transition"
+                >
+                  + ساعتين
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setQuickCloseHours(6)}
+                  className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 font-bold text-slate-700 hover:bg-slate-100 transition"
+                >
+                  + 6 ساعات
+                </button>
+                <button
+                  type="button"
+                  onClick={setQuickCloseEndOfDay}
+                  className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 font-bold text-slate-700 hover:bg-slate-100 transition"
+                >
+                  حتى نهاية اليوم (11:59 م)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setQuickCloseHours(24)}
+                  className="rounded-lg border border-indigo-200 bg-indigo-50 px-2 py-1 font-bold text-indigo-700 hover:bg-indigo-100 transition"
+                >
+                  + 24 ساعة (يوم كامل)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setQuickCloseHours(48)}
+                  className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 font-bold text-slate-700 hover:bg-slate-100 transition"
+                >
+                  + 48 ساعة
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Options for Reopen mode */}
+          {republishMode === 'reopen' && (
+            <div className="space-y-2 rounded-xl bg-slate-50 p-3 text-xs border border-slate-100">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={republishResetIncomplete}
+                  onChange={(e) => setRepublishResetIncomplete(e.target.checked)}
+                  className="size-4 mt-0.5 rounded text-indigo-600"
+                />
+                <div>
+                  <span className="font-bold text-slate-800">
+                    السماح للطلاب الذين انقطع اتصالهم أو لم يسلموا بإعادة المحاولة
+                  </span>
+                  <p className="text-[11px] text-slate-500">
+                    إعادة ضبط الجلسات المفتوحة أو غير المكتملة حتى يتمكنوا من الدخول مرة أخرى.
+                  </p>
+                </div>
+              </label>
+
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={republishHideResults}
+                  onChange={(e) => setRepublishHideResults(e.target.checked)}
+                  className="size-4 mt-0.5 rounded text-indigo-600"
+                />
+                <div>
+                  <span className="font-bold text-slate-800">
+                    حجب إعلان النتيجة مؤقتاً أثناء فترة التمديد
+                  </span>
+                  <p className="text-[11px] text-slate-500">
+                    يمنع الطلاب الجدد من معرفة الإجابات النموذجية من زملائهم حتى انتهاء فترة التمديد.
+                  </p>
+                </div>
+              </label>
+            </div>
+          )}
+
+          {/* Submit & Cancel Buttons */}
+          <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+            <button
+              type="button"
+              onClick={() => setRepublishModalOpen(false)}
+              className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 transition"
+            >
+              إلغاء
+            </button>
+            <button
+              type="submit"
+              disabled={savingRepublish || !teacherStatus.isActive}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white shadow-xs hover:bg-indigo-700 transition active:scale-95 disabled:opacity-50"
+            >
+              {savingRepublish ? (
+                <>
+                  <Loader2 className="size-3.5 animate-spin" />
+                  <span>جاري الحفظ...</span>
+                </>
+              ) : (
+                <>
+                  <RotateCcw className="size-3.5" />
+                  <span>
+                    {republishMode === 'reopen'
+                      ? 'تأكيد تمديد وإعادة فتح الاختبار'
+                      : 'تأكيد نشر النسخة الجديدة'}
+                  </span>
+                </>
+              )}
+            </button>
+          </div>
+        </form>
       </Modal>
     </div>
   )

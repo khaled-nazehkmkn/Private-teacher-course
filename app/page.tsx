@@ -1391,6 +1391,149 @@ export default function TeacherAppPage() {
     setExams((prev) => prev.filter((e) => e.id !== examId))
   }
 
+  const handleRepublishExam = async (data: {
+    examId: string
+    mode: 'reopen' | 'clone'
+    title?: string
+    opens_at: string | null
+    closes_at: string | null
+    duration_min: number
+    resetIncomplete?: boolean
+    hideResults?: boolean
+  }) => {
+    const supabase = createClient()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (user) {
+      if (data.mode === 'reopen') {
+        const updatePayload: Record<string, any> = {
+          opens_at: data.opens_at ? new Date(data.opens_at).toISOString() : null,
+          closes_at: data.closes_at ? new Date(data.closes_at).toISOString() : null,
+          duration_min: Math.max(1, Number(data.duration_min) || 30),
+        }
+        if (data.hideResults) {
+          updatePayload.results_released = false
+        }
+
+        const { error: updateErr } = await supabase
+          .from('exams')
+          .update(updatePayload)
+          .eq('id', data.examId)
+          .eq('teacher_id', user.id)
+
+        if (updateErr) {
+          console.error('[RepublishExam] Error reopening exam:', updateErr)
+          throw new Error(updateErr.message || 'فشل إعادة فتح الاختبار')
+        }
+
+        if (data.resetIncomplete) {
+          await supabase
+            .from('submissions')
+            .delete()
+            .eq('exam_id', data.examId)
+            .is('submitted_at', null)
+        }
+
+        await loadData()
+        return
+      } else {
+        // Clone mode: create a new exam with the same questions and answers
+        const { data: origExam, error: fetchErr } = await supabase
+          .from('exams')
+          .select('*')
+          .eq('id', data.examId)
+          .eq('teacher_id', user.id)
+          .single()
+
+        if (fetchErr || !origExam) {
+          throw new Error('الاختبار الأصلي غير موجود')
+        }
+
+        const newTitle = data.title || `${origExam.title} (إعادة)`
+
+        const { data: newExam, error: insertErr } = await supabase
+          .from('exams')
+          .insert({
+            teacher_id: user.id,
+            title: newTitle,
+            group_id: origExam.group_id,
+            grade: origExam.grade,
+            duration_min: Math.max(1, Number(data.duration_min) || origExam.duration_min || 30),
+            opens_at: data.opens_at ? new Date(data.opens_at).toISOString() : null,
+            closes_at: data.closes_at ? new Date(data.closes_at).toISOString() : null,
+            shuffle: origExam.shuffle,
+            results_released: false,
+          })
+          .select()
+          .single()
+
+        if (insertErr || !newExam) {
+          console.error('[RepublishExam] Error cloning exam:', insertErr)
+          throw new Error(insertErr?.message || 'فشل نشر النسخة الجديدة من الاختبار')
+        }
+
+        // Clone questions mapping
+        const { data: origQuestions } = await supabase
+          .from('exam_questions')
+          .select('question_id, position, marks_override')
+          .eq('exam_id', data.examId)
+
+        if (origQuestions && origQuestions.length > 0) {
+          await supabase.from('exam_questions').insert(
+            origQuestions.map((q) => ({
+              exam_id: newExam.id,
+              question_id: q.question_id,
+              position: q.position,
+              marks_override: q.marks_override,
+            }))
+          )
+        }
+
+        await loadData()
+        return
+      }
+    }
+
+    // Local fallback for offline/demo
+    if (data.mode === 'reopen') {
+      setExams((prev) =>
+        prev.map((e) =>
+          e.id === data.examId
+            ? {
+                ...e,
+                opens_at: data.opens_at || null,
+                closes_at: data.closes_at || null,
+                duration_min: data.duration_min,
+                results_released: data.hideResults ? false : e.results_released,
+              }
+            : e
+        )
+      )
+    } else {
+      const orig = exams.find((e) => e.id === data.examId)
+      if (orig) {
+        const id = `exam-${Date.now()}`
+        const token = Math.random().toString(36).substring(2, 14)
+        setExams((prev) => [
+          {
+            ...orig,
+            id,
+            title: data.title || `${orig.title} (إعادة)`,
+            opens_at: data.opens_at || null,
+            closes_at: data.closes_at || null,
+            duration_min: data.duration_min,
+            results_released: false,
+            public_token: token,
+            created_at: new Date().toISOString(),
+          },
+          ...prev,
+        ])
+      }
+    }
+  }
+
   const handleFetchExamSubmissions = async (examId: string): Promise<ExamSubmissionDetail[]> => {
     try {
       const supabase = createClient()
@@ -1773,6 +1916,7 @@ export default function TeacherAppPage() {
               onCreateExam={handleCreateExam}
               onToggleResultsRelease={handleToggleResultsRelease}
               onDeleteExam={handleDeleteExam}
+              onRepublishExam={handleRepublishExam}
               onFetchExamSubmissions={handleFetchExamSubmissions}
               onDeleteSubmission={handleDeleteExamSubmission}
               onLogWhatsAppResult={(sId, msg) => handleLogWhatsAppMessage(sId, msg, 'result')}
