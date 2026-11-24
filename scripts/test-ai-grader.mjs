@@ -13,6 +13,8 @@ import {
   normalizeRawPowers,
   cleanGeminiArtifacts,
 } from '../components/ui/math-renderer.js'
+import { parseJsonQuestions } from '../lib/question-parser.js'
+import fs from 'node:fs'
 
 let totalTests = 0
 let passedTests = 0
@@ -270,6 +272,69 @@ async function runTests() {
     const wrappedEng = '$' + engQuestion + '$'
     const unwrappedResult = cleanGeminiArtifacts(wrappedEng)
     assert(unwrappedResult.startsWith('In a geometric sequence, the sum of the $4^{th}$'), 'Accidentally wrapped English sentence is unwrapped so font matches standard text')
+  }
+
+  // ----------------------------------------------------------------
+  // Test Suite 6: AI Prompt Template Verification (Arabic Math & JSON Safety)
+  // ----------------------------------------------------------------
+  console.log('\nTest Suite 6: AI Prompt Template Verification (Arabic Math & JSON Safety)')
+  {
+    const questionsViewContent = fs.readFileSync('components/questions/QuestionsView.tsx', 'utf8')
+    assert(questionsViewContent.includes('export const AI_PROMPT_TEMPLATE'), 'AI_PROMPT_TEMPLATE is exported')
+
+    // Extract JSON block from template
+    const jsonMatch = questionsViewContent.match(/\{\s*"questions":\s*\[[\s\S]*?\]\s*\}/)
+    assert(jsonMatch !== null, 'Found questions JSON block inside AI_PROMPT_TEMPLATE')
+
+    // Verify valid JSON syntax
+    let templateData
+    try {
+      templateData = JSON.parse(jsonMatch[0])
+      assert(true, 'AI prompt JSON block parses cleanly without syntax errors')
+    } catch (err) {
+      assert(false, `AI prompt JSON block failed JSON.parse: ${err.message}`)
+    }
+
+    assert(Array.isArray(templateData.questions), 'Template contains "questions" array')
+    assert(templateData.questions.length >= 4, `Template contains ${templateData.questions.length} questions (at least 4)`)
+
+    // 1. Arabic Math MCQ (Geometric Series)
+    const arabicMcq = templateData.questions.find((q) => q.topic === 'الجبر' && q.body.includes('متتابعة هندسية'))
+    assert(arabicMcq !== undefined, 'Contains Arabic Geometric Series MCQ question')
+    assert(!arabicMcq.body.startsWith('$'), 'Arabic question body does NOT start with "$" (avoids KaTeX font corruption)')
+    assert(!arabicMcq.body.endsWith('$'), 'Arabic question body is NOT wrapped in "$" as a whole')
+    assert(arabicMcq.body.includes('$120$'), 'Math values in Arabic question are wrapped in $ ($120$)')
+    assert(arabicMcq.options.every((opt) => opt.startsWith('$') && opt.endsWith('$')), 'All numerical options in MCQ are wrapped in $')
+    assert(Array.isArray(arabicMcq.correct) && arabicMcq.correct[0] === 2, 'Correct answer uses 0-based indexing ([2])')
+
+    // 2. English Math MCQ (Languages / لغات School)
+    const engMcq = templateData.questions.find((q) => q.body.includes('In a geometric sequence'))
+    assert(engMcq !== undefined, 'Contains English Geometric Series MCQ for Languages schools')
+    assert(!engMcq.body.startsWith('$'), 'English question body does NOT start with "$" (avoids KaTeX italicizing/jamming words)')
+    assert(!engMcq.body.endsWith('$'), 'English question body is NOT wrapped in "$" as a whole')
+    assert(engMcq.body.includes('$120$') && engMcq.body.includes('$4^{th}$'), 'English math symbols/powers wrapped in $ while prose stays plain text')
+
+    // 3. Arabic Descriptive Text Options
+    const textOptionsQ = templateData.questions.find((q) => q.body.includes('الدالة') && q.options.includes('فردية'))
+    assert(textOptionsQ !== undefined, 'Contains question with Arabic descriptive text options')
+    assert(textOptionsQ.options.every((opt) => !opt.includes('$')), 'Descriptive Arabic options (فردية/زوجية) are plain text without $')
+
+    // 4. Arabic True / False Question
+    const tfQ = templateData.questions.find((q) => q.type === 'true_false')
+    assert(tfQ !== undefined, 'Contains True/False question')
+    assert(tfQ.options.length === 2 && tfQ.options[0] === 'صواب' && tfQ.options[1] === 'خطأ', 'True/False options are ["صواب", "خطأ"]')
+    assert(tfQ.correct[0] === 0 || tfQ.correct[0] === 1, 'True/False correct index is 0 or 1')
+
+    // 5. Arabic Essay Question
+    const essayQ = templateData.questions.find((q) => q.type === 'essay')
+    assert(essayQ !== undefined, 'Contains Essay question')
+    assert(essayQ.options.length === 0 && essayQ.correct.length === 0, 'Essay options and correct are empty arrays []')
+    assert(typeof essayQ.model_answer === 'string' && essayQ.model_answer.length > 20, 'Essay has detailed model answer')
+
+    // 6. Test with parseJsonQuestions (application parser)
+    const parseResult = parseJsonQuestions(jsonMatch[0])
+    assert(parseResult.errors.length === 0, `parseJsonQuestions parses AI prompt JSON with 0 errors (errors: ${parseResult.errors.join(', ')})`)
+    assert(parseResult.questions.length === templateData.questions.length, `parseJsonQuestions successfully parsed all ${templateData.questions.length} questions`)
   }
 
   console.log('\n====================================================')
