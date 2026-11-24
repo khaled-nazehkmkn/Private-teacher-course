@@ -52,6 +52,22 @@ export function containsProseWords(str: string): boolean {
 }
 
 /**
+ * Detects whether a math string contains bare natural language prose words
+ * OUTSIDE intentional LaTeX text commands like \\text{...} or \\mathrm{...}.
+ */
+export function hasBareProseOutsideText(str: string): boolean {
+  if (!str) return false
+  let stripped = str
+  for (let pass = 0; pass < 2; pass++) {
+    stripped = stripped.replace(
+      /\\(?:text|mathrm|mathbf|mathit|textbf|textit|textrm|operatorname)\s*\{(?:[^{}]|\{[^{}]*\})*\}/g,
+      ' '
+    )
+  }
+  return containsProseWords(stripped)
+}
+
+/**
  * Normalizes unwrapped mathematical powers and unicode superscripts (e.g. x^2, x², 10⁻³, (x-2)^2)
  * so they are rendered as proper KaTeX math formulas rather than broken text.
  */
@@ -92,17 +108,17 @@ export function normalizeRawPowers(raw: string): string {
 
   // 4. For mixed text (e.g. Arabic/English questions with unwrapped powers like "x^2 - 4" or "4^{th}"):
   // Split by existing math blocks ($$...$$, $...$, \(...\), \[...\])
-  const mathBlockRegex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\$[^\$\n]+?\$|\\\(.*?\\\))/g
+  const mathBlockRegex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\$[^\$\n]+?\$|\\\([\s\S]*?\\\))/g
   const parts = text.split(mathBlockRegex)
 
   for (let i = 0; i < parts.length; i += 2) {
     let segment = parts[i]
     if (!segment || !segment.includes('^')) continue
 
-    // Wrap bare power expressions or equations with powers:
-    // e.g. (X - 2)^2, x^2 - 4x + 4, x^2 = 25, 2^3, 10^{-3}, 4^{th}
+    // Wrap bare power expressions or equations with powers (supports 1-level nested braces e.g. 4^{\\text{th}}):
+    // e.g. (X - 2)^2, x^2 - 4x + 4, x^2 = 25, 2^3, 10^{-3}, 4^{th}, 4^{\\text{th}}
     segment = segment.replace(
-      /(?<![$\w\\/])((?:\([A-Za-z0-9+\-*/.\s]+\)|[A-Za-z0-9]+)\^(?:\{[^{}]+\}|-?[A-Za-z0-9]+)(?:\s*[-+*/=<>≤≥≠]\s*(?:(?:\([A-Za-z0-9+\-*/.\s]+\)|[A-Za-z0-9]+)(?:\^(?:\{[^{}]+\}|-?[A-Za-z0-9]+))?|[A-Za-z0-9]+(?:\.[0-9]+)?))*)(?![$\w^])/g,
+      /(?<![$\w\\/])((?:\([A-Za-z0-9+\-*/.\s]+\)|[A-Za-z0-9]+)\^(?:\{(?:[^{}]|\{[^{}]*\})+\}|-?[A-Za-z0-9]+)(?:\s*[-+*/=<>≤≥≠]\s*(?:(?:\([A-Za-z0-9+\-*/.\s]+\)|[A-Za-z0-9]+)(?:\^(?:\{(?:[^{}]|\{[^{}]*\})+\}|-?[A-Za-z0-9]+))?|[A-Za-z0-9]+(?:\.[0-9]+)?))*)(?![$\w^])/g,
       (match) => `$${match.trim()}$`
     )
 
@@ -122,7 +138,7 @@ export function unwrapProseMath(text: string): string {
     return text
   }
 
-  const mathBlockRegex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\$[^\$\n]+?\$|\\\(.*?\\\))/g
+  const mathBlockRegex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\$[^\$\n]+?\$|\\\([\s\S]*?\\\))/g
   return text.replace(mathBlockRegex, (match) => {
     let content = match
     if (match.startsWith('$$') && match.endsWith('$$')) content = match.slice(2, -2)
@@ -130,14 +146,9 @@ export function unwrapProseMath(text: string): string {
     else if (match.startsWith('$') && match.endsWith('$')) content = match.slice(1, -1)
     else if (match.startsWith('\\(') && match.endsWith('\\)')) content = match.slice(2, -2)
 
-    // If it intentionally uses \text{} or \mathrm{}, keep as is
-    if (/\\(?:text|mathrm|mathbf|mathit)\s*\{/.test(content)) {
-      return match
-    }
-
-    // If it contains natural prose words, unwrap the prose and normalize embedded powers
-    if (containsProseWords(content)) {
-      const unwrapped = content.trim()
+    // If it contains bare natural prose words outside \text{} / \mathrm{}, unwrap the prose and normalize embedded powers
+    if (hasBareProseOutsideText(content)) {
+      const unwrapped = content.replace(/\\ +/g, ' ').trim()
       return normalizeRawPowers(unwrapped)
     }
 
@@ -409,7 +420,7 @@ export function MathRenderer({
     const renderKatexSegment = (rawMath: string, isBlock: boolean): Segment => {
       // Safety net: If math block contains prose words without \text{}, render as standard text
       // to guarantee readable font with normal spacing (never cramped italic math font)
-      if (containsProseWords(rawMath) && !/\\(?:text|mathrm|mathbf|mathit)\s*\{/.test(rawMath)) {
+      if (hasBareProseOutsideText(rawMath)) {
         return {
           type: 'text',
           value: rawMath,
@@ -653,7 +664,7 @@ export function MathRenderer({
       if (!plainText) return []
       // Matches unwrapped expressions like X^2, x^{2n}, (x - 2)^2, 10^{-3}, 180^\circ, x², or x_1 / a_{n}
       const barePowerOrSubRegex =
-        /(?:\([A-Za-z0-9+\-*/.\s]+\)|[A-Za-z0-9]+)(?:\s*\^\s*(?:\{[^{}]+\}|\\[A-Za-z]+|-?[A-Za-z0-9]+)|[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻ⁿⁱ]+)+|\b[A-Za-z]_(?:\{[^{}]+\}|\d+)\b/g
+        /(?:\([A-Za-z0-9+\-*/.\s]+\)|[A-Za-z0-9]+)(?:\s*\^\s*(?:\{(?:[^{}]|\{[^{}]*\})+\}|\\[A-Za-z]+|-?[A-Za-z0-9]+)|[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻ⁿⁱ]+)+|\b[A-Za-z]_(?:\{(?:[^{}]|\{[^{}]*\})+\}|\d+)\b/g
 
       let cursor = 0
       const out: Segment[] = []

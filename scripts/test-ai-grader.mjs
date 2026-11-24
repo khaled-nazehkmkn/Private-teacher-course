@@ -12,6 +12,7 @@ import {
 import {
   normalizeRawPowers,
   cleanGeminiArtifacts,
+  hasBareProseOutsideText,
 } from '../components/ui/math-renderer.js'
 import { parseJsonQuestions } from '../lib/question-parser.js'
 import fs from 'node:fs'
@@ -272,6 +273,26 @@ async function runTests() {
     const wrappedEng = '$' + engQuestion + '$'
     const unwrappedResult = cleanGeminiArtifacts(wrappedEng)
     assert(unwrappedResult.startsWith('In a geometric sequence, the sum of the $4^{th}$'), 'Accidentally wrapped English sentence is unwrapped so font matches standard text')
+
+    // 10. Accidentally wrapped English sentence containing \text{th} or \mathrm{th} (e.g. 4^{\text{th}}) MUST ALSO be unwrapped!
+    const wrappedWithTextTh = '$In a geometric sequence, the sum of the 4^{\\text{th}} and 6^{\\text{th}} terms is 120 and the sum of the 5^{\\text{th}} and 7^{\\text{th}} terms = 240, then the sum of first 10 terms = ............$'
+    const cleanedTextTh = cleanGeminiArtifacts(wrappedWithTextTh)
+    assert(
+      cleanedTextTh === 'In a geometric sequence, the sum of the $4^{\\text{th}}$ and $6^{\\text{th}}$ terms is 120 and the sum of the $5^{\\text{th}}$ and $7^{\\text{th}}$ terms = 240, then the sum of first 10 terms = ............',
+      'Unwraps English prose containing \\text{th} and wraps only ordinal powers in $...$'
+    )
+
+    const wrappedWithMathrmTh = '\\(In a geometric sequence,\nthe sum of the 4^{\\mathrm{th}} terms\\)'
+    const cleanedMathrmTh = cleanGeminiArtifacts(wrappedWithMathrmTh)
+    assert(
+      cleanedMathrmTh.startsWith('In a geometric sequence,\nthe sum of the $4^{\\mathrm{th}}$ terms'),
+      'Unwraps multiline \\(...\\) prose containing \\mathrm{th}'
+    )
+
+    // 11. Genuine math with \text{...} or \mathrm{...} must NOT be detected as bare prose
+    assert(hasBareProseOutsideText('4^{\\text{th}}') === false, 'Genuine math "4^{\\text{th}}" is kept as KaTeX math')
+    assert(hasBareProseOutsideText('x = 5\\text{ cm}') === false, 'Genuine math "x = 5\\text{ cm}" is kept as KaTeX math')
+    assert(hasBareProseOutsideText('In a geometric sequence, 4^{\\text{th}}') === true, 'Bare prose outside \\text{th} is detected and unwrapped')
   }
 
   // ----------------------------------------------------------------
