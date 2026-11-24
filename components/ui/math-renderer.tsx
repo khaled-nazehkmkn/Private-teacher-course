@@ -45,7 +45,13 @@ export function containsProseWords(str: string): boolean {
   if (!str) return false
   if (/[\u0600-\u06FF]/.test(str)) return true
 
-  const words = str.match(/\b[A-Za-z]{2,}\b/g)
+  // Ignore LaTeX commands (\left, \right, \geq, \frac, etc.) and environment names (\begin{...})
+  // so LaTeX syntax keywords are never mistaken for English prose words.
+  const withoutLatexCmds = str
+    .replace(/\\(?:begin|end)\s*\{[^}]*\}/g, ' ')
+    .replace(/\\[A-Za-z]+/g, ' ')
+
+  const words = withoutLatexCmds.match(/\b[A-Za-z]{2,}\b/g)
   if (!words) return false
 
   return words.some((w) => !MATH_IDENTIFIERS.has(w.toLowerCase()))
@@ -138,8 +144,22 @@ export function unwrapProseMath(text: string): string {
     return text
   }
 
+  let current = text
+  const trimmed = current.trim()
+  if (
+    trimmed.startsWith('$') &&
+    !trimmed.startsWith('$$') &&
+    trimmed.endsWith('$') &&
+    !trimmed.endsWith('$$')
+  ) {
+    const inner = trimmed.slice(1, -1)
+    if (!inner.includes('$') && hasBareProseOutsideText(inner)) {
+      current = normalizeRawPowers(inner.replace(/\\ +/g, ' ').trim())
+    }
+  }
+
   const mathBlockRegex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\$[^\$\n]+?\$|\\\([\s\S]*?\\\))/g
-  return text.replace(mathBlockRegex, (match) => {
+  return current.replace(mathBlockRegex, (match) => {
     let content = match
     if (match.startsWith('$$') && match.endsWith('$$')) content = match.slice(2, -2)
     else if (match.startsWith('\\[') && match.endsWith('\\]')) content = match.slice(2, -2)

@@ -13,6 +13,7 @@ import {
   normalizeRawPowers,
   cleanGeminiArtifacts,
   hasBareProseOutsideText,
+  containsProseWords,
 } from '../components/ui/math-renderer.js'
 import { parseJsonQuestions } from '../lib/question-parser.js'
 import fs from 'node:fs'
@@ -293,6 +294,15 @@ async function runTests() {
     assert(hasBareProseOutsideText('4^{\\text{th}}') === false, 'Genuine math "4^{\\text{th}}" is kept as KaTeX math')
     assert(hasBareProseOutsideText('x = 5\\text{ cm}') === false, 'Genuine math "x = 5\\text{ cm}" is kept as KaTeX math')
     assert(hasBareProseOutsideText('In a geometric sequence, 4^{\\text{th}}') === true, 'Bare prose outside \\text{th} is detected and unwrapped')
+
+    // 12. LaTeX commands like \left, \right, \geq, \begin{pmatrix} must NOT be flagged as English prose words
+    assert(containsProseWords('\\left(\\frac{1}{a} + \\frac{1}{b}\\right) \\geq 4') === false, 'LaTeX commands (\\left, \\right, \\geq) are not mistaken for English prose')
+    assert(containsProseWords('\\begin{pmatrix} 1 & 2 \\\\ 3 & 4 \\end{pmatrix}') === false, 'LaTeX matrix environment is not mistaken for English prose')
+    assert(cleanGeminiArtifacts('$\\left(\\frac{1}{a} + \\frac{1}{b}\\right) \\geq 4$') === '$\\left(\\frac{1}{a} + \\frac{1}{b}\\right) \\geq 4$', 'Preserves $...$ wrapping around \\left...\\right \\geq formula')
+
+    // 13. Multiline single-$ block wrapping prose is unwrapped cleanly
+    const multilineDollarProse = '$Find f(X) in its simplest form:\nf(X) = \\frac{1}{X}$'
+    assert(cleanGeminiArtifacts(multilineDollarProse) === 'Find f(X) in its simplest form:\nf(X) = \\frac{1}{X}', 'Unwraps multiline single-$ prose block')
   }
 
   // ----------------------------------------------------------------
