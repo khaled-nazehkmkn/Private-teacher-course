@@ -18,6 +18,13 @@ import {
   AlertTriangle,
 } from 'lucide-react'
 import { MathRenderer } from '@/components/ui/math-renderer'
+import {
+  type ExamLanguage,
+  formatMarksBadge,
+  formatQuestionLabel,
+  getOptionLetters,
+  normalizeExamLanguage,
+} from '@/lib/exam-language'
 
 interface QuestionItem {
   id: string
@@ -33,6 +40,7 @@ interface ExamMeta {
   title: string
   duration_min: number
   grade?: string
+  language?: ExamLanguage
   teacher_name: string
   subject: string
   isOpen: boolean
@@ -446,6 +454,9 @@ export default function StudentExamPage({
   const minutes = Math.floor(secondsRemaining / 60)
   const seconds = secondsRemaining % 60
   const formattedTime = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+  const examLang = normalizeExamLanguage(meta?.language)
+  const isEn = examLang === 'en'
+  const optionLetters = getOptionLetters(examLang)
 
   if (loadingMeta) {
     return (
@@ -475,7 +486,11 @@ export default function StudentExamPage({
   // Render Step 3: Submitted / Ended State
   if (isSubmitted) {
     return (
-      <div className="flex min-h-screen w-full max-w-full overflow-x-clip flex-col items-center justify-center bg-[#f6f8fb] p-4 text-[#17263b]">
+      <div
+        dir={isEn ? 'ltr' : 'rtl'}
+        lang={examLang}
+        className="flex min-h-screen w-full max-w-full overflow-x-clip flex-col items-center justify-center bg-[#f6f8fb] p-4 text-[#17263b]"
+      >
         <div className="w-full max-w-lg rounded-3xl border border-[#e6ebf2] bg-white p-6 sm:p-8 text-center shadow-xl">
           {endedByLeave ? (
             <>
@@ -484,16 +499,30 @@ export default function StudentExamPage({
               </div>
 
               <h2 className="mt-4 text-xl sm:text-2xl font-extrabold text-rose-700">
-                تم إنهاء جلسة الاختبار تلقائياً
+                {isEn ? 'Exam Session Ended Automatically' : 'تم إنهاء جلسة الاختبار تلقائياً'}
               </h2>
               <p className="mt-2 text-xs sm:text-sm text-slate-700 leading-relaxed">
-                الطالب <span className="font-bold text-slate-900">{studentName}</span>، تم إغلاق وإنهاء جلستك في الاختبار لأنك غادرت صفحة الاختبار أو انتقلت إلى تطبيق آخر.
+                {isEn ? (
+                  <>
+                    Student <span className="font-bold text-slate-900">{studentName}</span>, your exam session was closed because you left the exam page or switched to another app.
+                  </>
+                ) : (
+                  <>
+                    الطالب <span className="font-bold text-slate-900">{studentName}</span>، تم إغلاق وإنهاء جلستك في الاختبار لأنك غادرت صفحة الاختبار أو انتقلت إلى تطبيق آخر.
+                  </>
+                )}
               </p>
 
               <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50/80 p-4 text-xs font-bold text-rose-800 leading-relaxed">
-                <p>تم حفظ وتسليم الإجابات التي قمت باختيارها قبل مغادرة الجلسة.</p>
+                <p>
+                  {isEn
+                    ? 'The answers you selected before leaving have been saved and submitted.'
+                    : 'تم حفظ وتسليم الإجابات التي قمت باختيارها قبل مغادرة الجلسة.'}
+                </p>
                 <p className="mt-1 font-normal text-rose-700">
-                  لا يمكنك إعادة الدخول للاختبار مرة أخرى إلا إذا قام المعلم بحذف سجل المحاولة الخاص بك.
+                  {isEn
+                    ? 'You cannot re-enter the exam unless your teacher resets your attempt.'
+                    : 'لا يمكنك إعادة الدخول للاختبار مرة أخرى إلا إذا قام المعلم بحذف سجل المحاولة الخاص بك.'}
                 </p>
               </div>
             </>
@@ -503,18 +532,34 @@ export default function StudentExamPage({
                 <CheckCircle2 className="size-10" />
               </div>
 
-              <h2 className="mt-4 text-xl sm:text-2xl font-extrabold text-[#153b68]">تم تسليم الاختبار بنجاح</h2>
+              <h2 className="mt-4 text-xl sm:text-2xl font-extrabold text-[#153b68]">
+                {isEn ? 'Exam Submitted Successfully' : 'تم تسليم الاختبار بنجاح'}
+              </h2>
               <p className="mt-2 text-xs sm:text-sm text-slate-600">
-                شكراً لك، <span className="font-bold text-slate-800">{studentName}</span>. تم تسجيل إجاباتك بنجاح على الخادم.
+                {isEn ? (
+                  <>
+                    Thank you, <span className="font-bold text-slate-800">{studentName}</span>. Your answers have been recorded.
+                  </>
+                ) : (
+                  <>
+                    شكراً لك، <span className="font-bold text-slate-800">{studentName}</span>. تم تسجيل إجاباتك بنجاح على الخادم.
+                  </>
+                )}
               </p>
             </>
           )}
 
           {resultData?.has_essay && (
             <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50/80 p-4 text-xs font-bold text-amber-800">
-              <p>⏳ يتضمن هذا الاختبار أسئلة مقالية أو ورقية بانتظار مراجعة المعلم.</p>
+              <p>
+                {isEn
+                  ? '⏳ This exam contains essay or handwritten questions awaiting teacher grading.'
+                  : '⏳ يتضمن هذا الاختبار أسئلة مقالية أو ورقية بانتظار مراجعة المعلم.'}
+              </p>
               <p className="mt-1 font-normal text-slate-600">
-                سيقوم المعلم بتصحيح إجاباتك ورصد الدرجات النهائية قريباً.
+                {isEn
+                  ? 'Your teacher will review your answers and release the final score soon.'
+                  : 'سيقوم المعلم بتصحيح إجاباتك ورصد الدرجات النهائية قريباً.'}
               </p>
             </div>
           )}
@@ -524,26 +569,31 @@ export default function StudentExamPage({
               <div className="mx-auto grid size-12 place-items-center rounded-full bg-emerald-100 text-emerald-700">
                 <Award className="size-6" />
               </div>
-              <p className="mt-3 text-xs font-bold text-emerald-700">درجة الاختبار</p>
-              <p className="mt-1 text-3xl sm:text-4xl font-black">
+              <p className="mt-3 text-xs font-bold text-emerald-700">
+                {isEn ? 'Exam Score' : 'درجة الاختبار'}
+              </p>
+              <p className="mt-1 text-3xl sm:text-4xl font-black" dir="ltr">
                 {resultData.score}{' '}
                 <span className="text-lg sm:text-xl font-normal text-emerald-600">/ {resultData.max_score}</span>
               </p>
               <p className="mt-2 text-xs font-semibold">
-                النسبة المئوية: {Math.round(((resultData.score || 0) / (resultData.max_score || 1)) * 100)}%
+                {isEn ? 'Percentage: ' : 'النسبة المئوية: '}
+                {Math.round(((resultData.score || 0) / (resultData.max_score || 1)) * 100)}%
               </p>
             </div>
           ) : (
             <div className="mt-6 rounded-2xl border border-blue-100 bg-blue-50/70 p-4 sm:p-5 text-xs sm:text-sm text-blue-900">
-              <p className="font-bold">ملاحظة بشأن النتيجة</p>
+              <p className="font-bold">{isEn ? 'Result Notice' : 'ملاحظة بشأن النتيجة'}</p>
               <p className="mt-1 text-xs text-blue-700">
-                سيتم إعلان الدرجة والتفاصيل من قبل الأستاذ بعد انتهاء موعد الاختبار ومراجعة الإجابات.
+                {isEn
+                  ? 'Your score and details will be released by your teacher after grading.'
+                  : 'سيتم إعلان الدرجة والتفاصيل من قبل الأستاذ بعد انتهاء موعد الاختبار ومراجعة الإجابات.'}
               </p>
             </div>
           )}
 
           <div className="mt-6 border-t border-slate-100 pt-4 text-xs text-slate-400">
-            {meta.title} · الأستاذ: {meta.teacher_name} ({meta.subject})
+            {meta.title} · {isEn ? 'Teacher:' : 'الأستاذ:'} {meta.teacher_name} {meta.subject ? `(${meta.subject})` : ''}
           </div>
         </div>
       </div>
@@ -553,7 +603,11 @@ export default function StudentExamPage({
   // Render Step 1: Access Code Prompt
   if (!submissionId) {
     return (
-      <div className="flex min-h-screen w-full max-w-full overflow-x-clip flex-col items-center justify-center bg-[#f6f8fb] p-4 text-[#17263b]">
+      <div
+        dir={isEn ? 'ltr' : 'rtl'}
+        lang={examLang}
+        className="flex min-h-screen w-full max-w-full overflow-x-clip flex-col items-center justify-center bg-[#f6f8fb] p-4 text-[#17263b]"
+      >
         <div className="w-full max-w-md rounded-3xl border border-[#e6ebf2] bg-white p-6 sm:p-8 shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
           <div className="flex flex-col items-center text-center">
             <div className="grid size-12 sm:size-14 place-items-center rounded-2xl bg-[#153b68] text-white shadow-md">
@@ -561,7 +615,9 @@ export default function StudentExamPage({
             </div>
             <h1 className="mt-4 text-lg sm:text-xl font-extrabold text-[#153b68]">{meta.title}</h1>
             <p className="mt-1 text-xs text-slate-500">
-              الأستاذ: {meta.teacher_name} · مادة {meta.subject}
+              {isEn
+                ? `Teacher: ${meta.teacher_name}${meta.subject ? ` · ${meta.subject}` : ''}`
+                : `الأستاذ: ${meta.teacher_name} · مادة ${meta.subject}`}
             </p>
             {meta.grade && (
               <span className="mt-2 rounded-full bg-slate-100 px-3 py-0.5 text-xs font-bold text-slate-600">
@@ -572,20 +628,24 @@ export default function StudentExamPage({
 
           <div className="mt-5 flex items-center justify-around rounded-2xl bg-slate-50 p-3 text-center text-xs text-slate-600">
             <div>
-              <p className="text-[11px] text-slate-400">مدة الاختبار</p>
-              <p className="mt-0.5 font-bold">{meta.duration_min} دقيقة</p>
+              <p className="text-[11px] text-slate-400">{isEn ? 'Duration' : 'مدة الاختبار'}</p>
+              <p className="mt-0.5 font-bold">
+                {isEn ? `${meta.duration_min} min` : `${meta.duration_min} دقيقة`}
+              </p>
             </div>
             <div className="h-6 w-px bg-slate-200" />
             <div>
-              <p className="text-[11px] text-slate-400">المحاولات</p>
-              <p className="mt-0.5 font-bold text-amber-600">محاولة واحدة فقط</p>
+              <p className="text-[11px] text-slate-400">{isEn ? 'Attempts' : 'المحاولات'}</p>
+              <p className="mt-0.5 font-bold text-amber-600">
+                {isEn ? '1 attempt only' : 'محاولة واحدة فقط'}
+              </p>
             </div>
           </div>
 
           {!meta.isOpen ? (
             <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-center text-xs font-bold text-amber-800">
               <AlertCircle className="mx-auto mb-1.5 size-5" />
-              {meta.closedReason || 'الاختبار مغلق حالياً'}
+              {meta.closedReason || (isEn ? 'This exam is currently closed' : 'الاختبار مغلق حالياً')}
             </div>
           ) : (
             <form onSubmit={handleStartExam} className="mt-5 space-y-4">
@@ -598,7 +658,7 @@ export default function StudentExamPage({
 
               <div>
                 <label className="mb-1.5 block text-xs font-bold text-slate-700">
-                  أدخل كود الدخول الخاص بك (Access Code)
+                  {isEn ? 'Enter your Access Code' : 'أدخل كود الدخول الخاص بك (Access Code)'}
                 </label>
                 <input
                   type="text"
@@ -606,12 +666,14 @@ export default function StudentExamPage({
                   required
                   value={accessCode}
                   onChange={(e) => setAccessCode(e.target.value)}
-                  placeholder="مثال: 48921"
+                  placeholder={isEn ? 'e.g. 48921' : 'مثال: 48921'}
                   className="w-full rounded-2xl border border-slate-200 bg-slate-50/50 py-3.5 px-4 text-center font-mono text-xl font-bold tracking-widest transition focus:border-[#1d5ca8] focus:bg-white focus:outline-hidden"
                   autoFocus
                 />
                 <p className="mt-1.5 text-center text-[11px] text-slate-400">
-                  الكود مكوّن من ٤ إلى ٦ أرقام ومخصص لك من المعلم
+                  {isEn
+                    ? '4 to 6 digit code assigned to you by your teacher'
+                    : 'الكود مكوّن من ٤ إلى ٦ أرقام ومخصص لك من المعلم'}
                 </p>
               </div>
 
@@ -619,16 +681,28 @@ export default function StudentExamPage({
               <div className="rounded-2xl border-2 border-rose-200 bg-rose-50/80 p-3.5 text-xs text-rose-900 space-y-1.5">
                 <div className="flex items-center gap-1.5 font-extrabold text-rose-700">
                   <ShieldAlert className="size-4 shrink-0" />
-                  <span>تنبيه هام قبل بدء الاختبار:</span>
+                  <span>{isEn ? 'Important notice before starting:' : 'تنبيه هام قبل بدء الاختبار:'}</span>
                 </div>
-                <ul className="space-y-1 text-[11px] font-semibold leading-relaxed text-rose-800 pr-1">
-                  <li>• مسموح بالدخول للاختبار مرة واحدة فقط باستخدام كودك.</li>
-                  <li>
-                    • يُمنع الخروج من صفحة الاختبار أو الانتقال إلى أي تطبيق آخر على الموبايل أو فتح تبويب جديد.
-                  </li>
-                  <li>
-                    • <strong>إذا غادرت الجلسة سيتم إنهاء الاختبار تلقائياً</strong> ولن تتمكن من الدخول مرة أخرى إلا بعد حذف السجل من قِبل المعلم.
-                  </li>
+                <ul className={`space-y-1 text-[11px] font-semibold leading-relaxed text-rose-800 ${isEn ? 'pl-1' : 'pr-1'}`}>
+                  {isEn ? (
+                    <>
+                      <li>• Only one attempt is allowed using your access code.</li>
+                      <li>• Do not leave the exam page, switch apps on mobile, or open another tab.</li>
+                      <li>
+                        • <strong>Leaving the session will automatically end your exam</strong> and you cannot re-enter unless your teacher resets your record.
+                      </li>
+                    </>
+                  ) : (
+                    <>
+                      <li>• مسموح بالدخول للاختبار مرة واحدة فقط باستخدام كودك.</li>
+                      <li>
+                        • يُمنع الخروج من صفحة الاختبار أو الانتقال إلى أي تطبيق آخر على الموبايل أو فتح تبويب جديد.
+                      </li>
+                      <li>
+                        • <strong>إذا غادرت الجلسة سيتم إنهاء الاختبار تلقائياً</strong> ولن تتمكن من الدخول مرة أخرى إلا بعد حذف السجل من قِبل المعلم.
+                      </li>
+                    </>
+                  )}
                 </ul>
               </div>
 
@@ -640,10 +714,10 @@ export default function StudentExamPage({
                 {starting ? (
                   <>
                     <Loader2 className="size-4 animate-spin" />
-                    جاري التحقق وبدء الاختبار...
+                    {isEn ? 'Verifying & starting exam...' : 'جاري التحقق وبدء الاختبار...'}
                   </>
                 ) : (
-                  <span>ابدأ الاختبار الآن</span>
+                  <span>{isEn ? 'Start Exam' : 'ابدأ الاختبار الآن'}</span>
                 )}
               </button>
             </form>
@@ -658,15 +732,21 @@ export default function StudentExamPage({
   const totalCount = questions.length
 
   return (
-    <div className="min-h-screen w-full max-w-full overflow-x-clip bg-[#f6f8fb] text-[#17263b] pb-24 sm:pb-12">
+    <div
+      dir={isEn ? 'ltr' : 'rtl'}
+      lang={examLang}
+      className="min-h-screen w-full max-w-full overflow-x-clip bg-[#f6f8fb] text-[#17263b] pb-24 sm:pb-12"
+    >
       {/* Sticky Top Mobile Header with Timer and Student Info */}
       <header className="sticky top-0 z-30 border-b border-[#e6ebf2] bg-white/95 backdrop-blur-md px-4 py-2.5 sm:py-3">
         <div className="mx-auto flex max-w-3xl items-center justify-between gap-2">
-          <div className="min-w-0 pr-1">
+          <div className={`min-w-0 ${isEn ? 'pl-1' : 'pr-1'}`}>
             <h1 className="truncate text-sm sm:text-base font-extrabold text-[#153b68]">
               {meta.title}
             </h1>
-            <p className="text-[11px] text-slate-500 truncate">الطالب: {studentName}</p>
+            <p className="text-[11px] text-slate-500 truncate">
+              {isEn ? `Student: ${studentName}` : `الطالب: ${studentName}`}
+            </p>
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
@@ -695,7 +775,9 @@ export default function StudentExamPage({
         <div className="mx-auto flex max-w-3xl items-center justify-center gap-1.5">
           <AlertTriangle className="size-3.5 shrink-0 text-rose-600" />
           <span>
-            تحذير: الخروج من هذه الصفحة أو فتح أي تطبيق آخر على الموبايل سيُنهي جلسة الاختبار فوراً.
+            {isEn
+              ? 'Warning: Leaving this page or switching to another app will end your exam session immediately.'
+              : 'تحذير: الخروج من هذه الصفحة أو فتح أي تطبيق آخر على الموبايل سيُنهي جلسة الاختبار فوراً.'}
           </span>
         </div>
       </div>
@@ -731,16 +813,18 @@ export default function StudentExamPage({
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="flex items-center gap-2">
-                  <span className="grid size-6 place-items-center rounded-lg bg-[#153b68] text-xs font-bold text-white">
-                    {qIndex + 1}
+                  <span className="grid min-w-7 h-6 px-1.5 place-items-center rounded-lg bg-[#153b68] text-xs font-bold text-white">
+                    {formatQuestionLabel(qIndex, examLang)}
                   </span>
                   <span className="text-xs font-bold text-slate-400">
-                    ({q.marks} {q.marks === 1 ? 'درجة' : 'درجات'})
+                    {formatMarksBadge(q.marks, examLang)}
                   </span>
                 </div>
 
                 {autosavingQuestionId === q.id && (
-                  <span className="text-[10px] text-slate-400 animate-pulse">جاري الحفظ...</span>
+                  <span className="text-[10px] text-slate-400 animate-pulse">
+                    {isEn ? 'Saving...' : 'جاري الحفظ...'}
+                  </span>
                 )}
               </div>
 
@@ -766,7 +850,7 @@ export default function StudentExamPage({
                     />
                     <div className="absolute bottom-3 left-3 flex items-center gap-1 rounded-lg bg-slate-900/75 px-2 py-1 text-[10px] font-bold text-white shadow-xs backdrop-blur-xs">
                       <ZoomIn className="size-3" />
-                      <span>انقر للتكبير</span>
+                      <span>{isEn ? 'Tap to zoom' : 'انقر للتكبير'}</span>
                     </div>
                   </div>
                 </div>
@@ -777,17 +861,23 @@ export default function StudentExamPage({
                 <div className="mt-3.5 space-y-2">
                   <label className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
                     <FileText className="size-4 text-[#1d5ca8]" />
-                    <span>إجابة السؤال المقالي:</span>
+                    <span>{isEn ? 'Essay Answer:' : 'إجابة السؤال المقالي:'}</span>
                   </label>
                   <textarea
                     rows={4}
                     value={typeof selectedOpt === 'string' ? selectedOpt : selectedOpt?.text || ''}
                     onChange={(e) => handleEssayChange(q.id, e.target.value)}
-                    placeholder="اكتب خطوات الحل أو الإجابة هنا، أو قم بحلها في ورقة خارجية وتصويرها بالأسفل..."
+                    placeholder={
+                      isEn
+                        ? 'Write your solution steps or answer here, or solve on paper and upload a photo below...'
+                        : 'اكتب خطوات الحل أو الإجابة هنا، أو قم بحلها في ورقة خارجية وتصويرها بالأسفل...'
+                    }
                     className="w-full rounded-xl border border-slate-200 bg-slate-50/50 p-3 text-xs sm:text-sm font-semibold outline-hidden focus:border-[#1d5ca8] focus:bg-white"
                   />
                   <p className="text-[11px] text-slate-400">
-                    يمكنك كتابة خطواتك هنا، كما يمكنك تصوير ورقة الإجابة في نهاية الامتحان.
+                    {isEn
+                      ? 'You can type your steps here, or upload photos of your handwritten answer sheet below.'
+                      : 'يمكنك كتابة خطواتك هنا، كما يمكنك تصوير ورقة الإجابة في نهاية الامتحان.'}
                   </p>
                 </div>
               ) : (
@@ -800,7 +890,9 @@ export default function StudentExamPage({
                         key={optIdx}
                         type="button"
                         onClick={() => handleSelectOption(q.id, optIdx)}
-                        className={`flex min-h-[48px] w-full min-w-0 items-center justify-between gap-2 rounded-xl border p-3 text-right text-xs sm:text-sm font-semibold transition active:scale-[0.99] ${
+                        className={`flex min-h-[48px] w-full min-w-0 items-center justify-between gap-2 rounded-xl border p-3 ${
+                          isEn ? 'text-left' : 'text-right'
+                        } text-xs sm:text-sm font-semibold transition active:scale-[0.99] ${
                           isSelected
                             ? 'border-[#1d5ca8] bg-[#eaf2ff] text-[#1d5ca8] shadow-xs'
                             : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
@@ -814,7 +906,7 @@ export default function StudentExamPage({
                                 : 'border border-slate-300 text-slate-500'
                             }`}
                           >
-                            {String.fromCharCode(65 + optIdx)}
+                            {optionLetters[optIdx] || String.fromCharCode(65 + optIdx)}
                           </span>
                           <MathRenderer text={option} as="span" className="min-w-0 flex-1 break-words" />
                         </div>
@@ -832,10 +924,16 @@ export default function StudentExamPage({
         <div className="rounded-2xl border border-blue-200 bg-blue-50/60 p-4 sm:p-5 shadow-xs">
           <div className="flex items-center gap-2 text-[#153b68]">
             <Camera className="size-5 text-[#1d5ca8]" />
-            <h3 className="text-sm font-extrabold">📸 رفع صور أوراق الحل اليدوي (اختياري)</h3>
+            <h3 className="text-sm font-extrabold">
+              {isEn
+                ? '📸 Upload Handwritten Answer Sheet Photos (Optional)'
+                : '📸 رفع صور أوراق الحل اليدوي (اختياري)'}
+            </h3>
           </div>
           <p className="mt-1 text-xs text-slate-500">
-            إذا قمت بحل الأسئلة المقالية أو الحسابية في ورقة وقلم، قم بتصويرها ورفعها هنا ليراجعها المعلم بدقة.
+            {isEn
+              ? 'If you solved essay or math problems on paper, take photos and upload them here for your teacher to review.'
+              : 'إذا قمت بحل الأسئلة المقالية أو الحسابية في ورقة وقلم، قم بتصويرها ورفعها هنا ليراجعها المعلم بدقة.'}
           </p>
 
           <div className="mt-3.5 flex flex-wrap gap-3 items-center">
@@ -882,7 +980,7 @@ export default function StudentExamPage({
                 ) : (
                   <div className="flex flex-col items-center text-[10px] font-bold text-[#1d5ca8]">
                     <Plus className="size-5 mb-0.5" />
-                    <span>إضافة ورقة</span>
+                    <span>{isEn ? 'Add sheet' : 'إضافة ورقة'}</span>
                   </div>
                 )}
               </label>
@@ -895,9 +993,11 @@ export default function StudentExamPage({
           <div className="mx-auto flex max-w-3xl items-center justify-between gap-3">
             <div className="text-xs">
               <span className="font-bold text-slate-800">
-                {answeredCount} من {totalCount}
+                {isEn ? `${answeredCount} of ${totalCount}` : `${answeredCount} من ${totalCount}`}
               </span>
-              <span className="text-slate-400 mr-1 hidden sm:inline">أسئلة مُجابة</span>
+              <span className={`text-slate-400 hidden sm:inline ${isEn ? 'ml-1' : 'mr-1'}`}>
+                {isEn ? 'answered' : 'أسئلة مُجابة'}
+              </span>
             </div>
 
             <button
@@ -908,12 +1008,12 @@ export default function StudentExamPage({
               {submitting ? (
                 <>
                   <Loader2 className="size-4 animate-spin" />
-                  جاري التسليم...
+                  {isEn ? 'Submitting...' : 'جاري التسليم...'}
                 </>
               ) : (
                 <>
                   <Send className="size-4" />
-                  <span>تسليم الاختبار</span>
+                  <span>{isEn ? 'Submit Exam' : 'تسليم الاختبار'}</span>
                 </>
               )}
             </button>

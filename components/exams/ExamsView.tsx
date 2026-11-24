@@ -31,12 +31,20 @@ import {
   Search,
   Check,
   Sparkles,
+  Globe,
 } from 'lucide-react'
 import { Modal } from '@/components/ui/modal'
 import { DateTimePicker } from '@/components/ui/datetime-picker'
 import { QRCodeModal } from '@/components/QRCodeModal'
 import { buildWhatsAppLink, formatExamResultMessage } from '@/lib/whatsapp'
 import { MathRenderer, cleanGeminiArtifacts, extractLessonFromTopic } from '@/components/ui/math-renderer'
+import {
+  type ExamLanguage,
+  formatMarksBadge,
+  formatQuestionLabel,
+  getOptionLetters,
+  normalizeExamLanguage,
+} from '@/lib/exam-language'
 import type { TeacherStatus } from '@/lib/teacher-status'
 import type { GroupItem } from '../groups/GroupsView'
 import type { QuestionBankItem } from '../questions/QuestionsView'
@@ -51,6 +59,7 @@ export interface ExamItem {
   opens_at: string | null
   closes_at: string | null
   shuffle: boolean
+  language?: ExamLanguage
   results_released: boolean
   public_token: string
   question_ids: string[]
@@ -88,9 +97,11 @@ interface Props {
     opens_at?: string | null
     closes_at?: string | null
     shuffle: boolean
+    language?: ExamLanguage
     question_ids: string[]
   }) => Promise<void>
   onToggleResultsRelease: (examId: string, currentReleased: boolean) => Promise<void>
+  onUpdateExamLanguage?: (examId: string, language: ExamLanguage) => Promise<void>
   onDeleteExam: (examId: string) => Promise<void>
   onRepublishExam?: (data: {
     examId: string
@@ -116,6 +127,7 @@ export function ExamsView({
   teacherName,
   onCreateExam,
   onToggleResultsRelease,
+  onUpdateExamLanguage,
   onDeleteExam,
   onRepublishExam,
   onFetchExamSubmissions,
@@ -157,6 +169,7 @@ export function ExamsView({
   const [title, setTitle] = useState('')
   const [targetGroupId, setTargetGroupId] = useState<string>('')
   const [durationMin, setDurationMin] = useState(30)
+  const [examLanguage, setExamLanguage] = useState<ExamLanguage>('ar')
   const [opensAt, setOpensAt] = useState('')
   const [closesAt, setClosesAt] = useState('')
   const [shuffle, setShuffle] = useState(true)
@@ -536,6 +549,7 @@ export function ExamsView({
           opens_at: republishOpensAt || null,
           closes_at: republishClosesAt || null,
           shuffle: republishExam.shuffle,
+          language: normalizeExamLanguage(republishExam.language),
           question_ids: republishExam.question_ids,
         })
       }
@@ -672,11 +686,13 @@ export function ExamsView({
         opens_at: opensAt ? new Date(opensAt).toISOString() : null,
         closes_at: closesAt ? new Date(closesAt).toISOString() : null,
         shuffle,
+        language: examLanguage,
         question_ids: finalQuestionIds,
       })
 
       setCreateModalOpen(false)
       setTitle('')
+      setExamLanguage('ar')
       setSelectedQuestionIds([])
       setLessonCounts({})
     } catch (err) {
@@ -780,6 +796,19 @@ export function ExamsView({
                         متاح حالياً
                       </span>
                     )}
+                    <button
+                      type="button"
+                      disabled={!teacherStatus.isActive || !onUpdateExamLanguage}
+                      onClick={() => {
+                        const nextLang: ExamLanguage = exam.language === 'en' ? 'ar' : 'en'
+                        onUpdateExamLanguage?.(exam.id, nextLang)
+                      }}
+                      className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-bold text-slate-600 transition hover:border-[#1d5ca8]/40 hover:bg-blue-50 hover:text-[#153b68] disabled:cursor-default disabled:hover:bg-slate-50"
+                      title="انقر لتبديل لغة عرض الاختبار (عربي س١ / إنجليزي Q1)"
+                    >
+                      <Globe className="size-2.5 text-[#1d5ca8]" />
+                      <span>{exam.language === 'en' ? 'English · Q1' : 'عربي · س١'}</span>
+                    </button>
                   </div>
                   <div className="flex shrink-0 items-center gap-1">
                     <button
@@ -957,6 +986,43 @@ export function ExamsView({
                 onChange={(e) => setDurationMin(Number(e.target.value))}
                 className="w-full rounded-xl border border-slate-200 p-2.5 text-xs outline-hidden"
               />
+            </div>
+          </div>
+
+          <div>
+            <label className="mb-1.5 flex items-center gap-1.5 text-xs font-bold text-slate-700">
+              <Globe className="size-3.5 text-[#1d5ca8]" />
+              <span>لغة عرض الاختبار وترقيم الأسئلة</span>
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <button
+                type="button"
+                onClick={() => setExamLanguage('ar')}
+                className={`flex flex-col items-start rounded-xl border p-2.5 text-right transition ${
+                  examLanguage === 'ar'
+                    ? 'border-[#1d5ca8] bg-blue-50/80 text-[#153b68] ring-1 ring-[#1d5ca8]/30 shadow-2xs'
+                    : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                <span className="text-xs font-extrabold">العربية (من اليمين لليسار)</span>
+                <span className="mt-0.5 text-[11px] font-medium text-slate-500">
+                  ترقيم الأسئلة: س١، س٢ · الخيارات: أ، ب، ج، د
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setExamLanguage('en')}
+                className={`flex flex-col items-start rounded-xl border p-2.5 text-right transition ${
+                  examLanguage === 'en'
+                    ? 'border-[#1d5ca8] bg-blue-50/80 text-[#153b68] ring-1 ring-[#1d5ca8]/30 shadow-2xs'
+                    : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                <span className="text-xs font-extrabold">English / لغات (من اليسار لليمين)</span>
+                <span className="mt-0.5 text-[11px] font-medium text-slate-500" dir="ltr">
+                  Questions: Q1, Q2 · Options: A, B, C, D
+                </span>
+              </button>
             </div>
           </div>
 
@@ -1961,110 +2027,128 @@ export function ExamsView({
             </div>
 
             {/* Printable Paper Exam Container */}
-            <div
-              id="printable-exam-sheet"
-              className="rounded-2xl border border-slate-300 bg-white p-6 sm:p-10 text-slate-900 shadow-sm print:m-0 print:border-none print:p-0 print:shadow-none"
-            >
-              {/* Exam Header */}
-              <div className="border-b-2 border-slate-800 pb-4">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="text-right">
-                    <p className="text-sm font-black text-slate-900">
-                      المعلم: <span className="text-[#1d5ca8]">{teacherName || 'الأستاذ'}</span>
-                    </p>
-                  </div>
-
-                  <div className="text-center flex-1">
-                    <h2 className="text-lg sm:text-2xl font-black text-slate-900">
-                      {printExam.title}
-                    </h2>
-                  </div>
-
-                  <div className="text-left text-xs font-bold text-slate-500 shrink-0" dir="ltr">
-                    <p>{printExam.duration_min} دقيقة</p>
-                  </div>
-                </div>
-
-                {/* Student Details Box */}
-                <div className="mt-4 rounded-xl border border-slate-400 p-3 text-xs sm:text-sm font-bold flex items-center justify-between gap-4">
-                  <div className="flex-1">
-                    <span>اسم الطالب: </span>
-                    <span className="text-slate-400 font-normal">........................................................................................................</span>
-                  </div>
-                  <div className="shrink-0 flex items-center gap-1.5 pr-4 border-r border-slate-300">
-                    <span>الدرجة: </span>
-                    <span className="inline-block w-14 border-b border-black text-center font-normal">/</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Exam Questions */}
-              <div className="mt-6 space-y-6">
-                {questions
-                  .filter((q) => printExam.question_ids.includes(q.id))
-                  .map((q, idx) => (
-                    <div key={q.id} className="break-inside-avoid border-b border-slate-100 pb-5">
-                      <div className="flex items-start justify-between gap-3">
-                        <h4 className="text-sm font-bold text-slate-900 leading-relaxed">
-                          <span className="ml-1.5 font-black text-slate-950">س {idx + 1}:</span>
-                          <MathRenderer text={q.body} as="span" />
-                        </h4>
-                        <span className="shrink-0 rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-600">
-                          ({q.marks || 1} درجات)
-                        </span>
+            {(() => {
+              const printLang = normalizeExamLanguage(printExam.language)
+              const isPrintEn = printLang === 'en'
+              const optionLetters = getOptionLetters(printLang)
+              return (
+                <div
+                  id="printable-exam-sheet"
+                  dir={isPrintEn ? 'ltr' : 'rtl'}
+                  className={`rounded-2xl border border-slate-300 bg-white p-6 sm:p-10 text-slate-900 shadow-sm print:m-0 print:border-none print:p-0 print:shadow-none ${isPrintEn ? 'text-left' : 'text-right'}`}
+                >
+                  {/* Exam Header */}
+                  <div className="border-b-2 border-slate-800 pb-4">
+                    <div className="flex items-center justify-between gap-4">
+                      <div>
+                        <p className="text-sm font-black text-slate-900">
+                          {isPrintEn ? 'Teacher: ' : 'المعلم: '}
+                          <span className="text-[#1d5ca8]">{teacherName || (isPrintEn ? 'Teacher' : 'الأستاذ')}</span>
+                        </p>
                       </div>
 
-                      {/* Optional Question Image */}
-                      {q.image_path && (
-                        <div className="mt-3 flex justify-center">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={q.image_path}
-                            alt={`سؤال ${idx + 1}`}
-                            className="max-h-48 w-auto rounded-lg border border-slate-200 object-contain"
-                          />
-                        </div>
-                      )}
+                      <div className="text-center flex-1">
+                        <h2 className="text-lg sm:text-2xl font-black text-slate-900">
+                          {printExam.title}
+                        </h2>
+                      </div>
 
-                      {/* Question Content: MCQ vs Essay */}
-                      {q.type === 'essay' ? (
-                        <div className="mt-4 space-y-3 pl-2">
-                          <p className="text-[11px] font-bold text-slate-400">إجابة السؤال (أجب في المساحة المخصصة موضحاً خطوات الحل):</p>
-                          <div className="space-y-3.5 border-r-2 border-slate-200 pr-3">
-                            <div className="border-b border-dashed border-slate-300 h-5" />
-                            <div className="border-b border-dashed border-slate-300 h-5" />
-                            <div className="border-b border-dashed border-slate-300 h-5" />
-                            <div className="border-b border-dashed border-slate-300 h-5" />
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                          {q.options?.map((opt, oIdx) => {
-                            const letters = ['أ', 'ب', 'ج', 'د', 'هـ']
-                            return (
-                              <div
-                                key={oIdx}
-                                className="flex items-center gap-2 rounded-lg border border-slate-200 p-2 font-medium"
-                              >
-                                <span className="flex size-5 shrink-0 items-center justify-center rounded-full border border-slate-400 text-[10px] font-bold">
-                                  {letters[oIdx] || oIdx + 1}
-                                </span>
-                                <MathRenderer text={opt} as="span" />
-                              </div>
-                            )
-                          })}
-                        </div>
-                      )}
+                      <div className="text-xs font-bold text-slate-500 shrink-0">
+                        <p>{isPrintEn ? `${printExam.duration_min} min` : `${printExam.duration_min} دقيقة`}</p>
+                      </div>
                     </div>
-                  ))}
-              </div>
 
-              {/* Paper Footer */}
-              <div className="mt-8 border-t-2 border-slate-800 pt-4 text-center text-xs font-bold text-slate-700">
-                <p>« مع أطيب التمنيات لجميع أبنائنا وبناتنا الطلاب بدوام التفوق والنجاح »</p>
-                <p className="mt-1 text-[11px] text-slate-500">مع تحيات: {teacherName}</p>
-              </div>
-            </div>
+                    {/* Student Details Box */}
+                    <div className="mt-4 rounded-xl border border-slate-400 p-3 text-xs sm:text-sm font-bold flex items-center justify-between gap-4">
+                      <div className="flex-1">
+                        <span>{isPrintEn ? 'Student Name: ' : 'اسم الطالب: '}</span>
+                        <span className="text-slate-400 font-normal">....................................................................................</span>
+                      </div>
+                      <div className={`shrink-0 flex items-center gap-1.5 border-slate-300 ${isPrintEn ? 'pl-4 border-l' : 'pr-4 border-r'}`}>
+                        <span>{isPrintEn ? 'Score: ' : 'الدرجة: '}</span>
+                        <span className="inline-block w-14 border-b border-black text-center font-normal">/</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Exam Questions */}
+                  <div className="mt-6 space-y-6">
+                    {questions
+                      .filter((q) => printExam.question_ids.includes(q.id))
+                      .map((q, idx) => (
+                        <div key={q.id} className="break-inside-avoid border-b border-slate-100 pb-5">
+                          <div className="flex items-start justify-between gap-3">
+                            <h4 className="text-sm font-bold text-slate-900 leading-relaxed">
+                              <span className={`font-black text-slate-950 ${isPrintEn ? 'mr-1.5' : 'ml-1.5'}`}>
+                                {formatQuestionLabel(idx, printLang)}:
+                              </span>
+                              <MathRenderer text={q.body} as="span" />
+                            </h4>
+                            <span className="shrink-0 rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-600">
+                              {formatMarksBadge(q.marks || 1, printLang)}
+                            </span>
+                          </div>
+
+                          {/* Optional Question Image */}
+                          {q.image_path && (
+                            <div className="mt-3 flex justify-center">
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={q.image_path}
+                                alt={isPrintEn ? `Question ${idx + 1}` : `سؤال ${idx + 1}`}
+                                className="max-h-48 w-auto rounded-lg border border-slate-200 object-contain"
+                              />
+                            </div>
+                          )}
+
+                          {/* Question Content: MCQ vs Essay */}
+                          {q.type === 'essay' ? (
+                            <div className="mt-4 space-y-3 pl-2">
+                              <p className="text-[11px] font-bold text-slate-400">
+                                {isPrintEn
+                                  ? 'Answer (show your solution steps clearly below):'
+                                  : 'إجابة السؤال (أجب في المساحة المخصصة موضحاً خطوات الحل):'}
+                              </p>
+                              <div className={`space-y-3.5 border-slate-200 ${isPrintEn ? 'border-l-2 pl-3' : 'border-r-2 pr-3'}`}>
+                                <div className="border-b border-dashed border-slate-300 h-5" />
+                                <div className="border-b border-dashed border-slate-300 h-5" />
+                                <div className="border-b border-dashed border-slate-300 h-5" />
+                                <div className="border-b border-dashed border-slate-300 h-5" />
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                              {q.options?.map((opt, oIdx) => (
+                                <div
+                                  key={oIdx}
+                                  className="flex items-center gap-2 rounded-lg border border-slate-200 p-2 font-medium"
+                                >
+                                  <span className="flex size-5 shrink-0 items-center justify-center rounded-full border border-slate-400 text-[10px] font-bold">
+                                    {optionLetters[oIdx] || oIdx + 1}
+                                  </span>
+                                  <MathRenderer text={opt} as="span" />
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                  </div>
+
+                  {/* Paper Footer */}
+                  <div className="mt-8 border-t-2 border-slate-800 pt-4 text-center text-xs font-bold text-slate-700">
+                    <p>
+                      {isPrintEn
+                        ? '« Best wishes to all our students for continued success and excellence »'
+                        : '« مع أطيب التمنيات لجميع أبنائنا وبناتنا الطلاب بدوام التفوق والنجاح »'}
+                    </p>
+                    <p className="mt-1 text-[11px] text-slate-500">
+                      {isPrintEn ? `With regards: ${teacherName}` : `مع تحيات: ${teacherName}`}
+                    </p>
+                  </div>
+                </div>
+              )
+            })()}
           </div>
         )}
       </Modal>

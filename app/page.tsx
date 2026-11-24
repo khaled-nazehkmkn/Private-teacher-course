@@ -356,6 +356,7 @@ export default function TeacherAppPage() {
               opens_at: e.opens_at,
               closes_at: e.closes_at,
               shuffle: e.shuffle,
+              language: e.language === 'en' ? 'en' : 'ar',
               results_released: e.results_released,
               public_token: e.public_token,
               question_ids: e.exam_questions?.map((eq: any) => eq.question_id) || [],
@@ -1321,6 +1322,7 @@ export default function TeacherAppPage() {
     opens_at?: string | null
     closes_at?: string | null
     shuffle: boolean
+    language?: 'ar' | 'en'
     question_ids: string[]
   }) => {
     const supabase = createClient()
@@ -1328,21 +1330,35 @@ export default function TeacherAppPage() {
       data: { user },
     } = await supabase.auth.getUser()
 
+    const examLang: 'ar' | 'en' = examData.language === 'en' ? 'en' : 'ar'
+
     if (user) {
-      const { data: newExam, error: examErr } = await supabase
+      const basePayload = {
+        teacher_id: user.id,
+        title: examData.title,
+        group_id: examData.group_id || null,
+        grade: examData.grade || null,
+        duration_min: examData.duration_min,
+        opens_at: examData.opens_at || null,
+        closes_at: examData.closes_at || null,
+        shuffle: examData.shuffle,
+      }
+
+      let { data: newExam, error: examErr } = await supabase
         .from('exams')
-        .insert({
-          teacher_id: user.id,
-          title: examData.title,
-          group_id: examData.group_id || null,
-          grade: examData.grade || null,
-          duration_min: examData.duration_min,
-          opens_at: examData.opens_at || null,
-          closes_at: examData.closes_at || null,
-          shuffle: examData.shuffle,
-        })
+        .insert({ ...basePayload, language: examLang })
         .select()
         .single()
+
+      if (examErr && (examErr.code === '42703' || examErr.message?.includes('language'))) {
+        const retry = await supabase
+          .from('exams')
+          .insert(basePayload)
+          .select()
+          .single()
+        newExam = retry.data
+        examErr = retry.error
+      }
 
       if (!examErr && newExam) {
         if (examData.question_ids.length > 0) {
@@ -1372,6 +1388,7 @@ export default function TeacherAppPage() {
         opens_at: examData.opens_at || null,
         closes_at: examData.closes_at || null,
         shuffle: examData.shuffle,
+        language: examLang,
         results_released: false,
         public_token: token,
         question_ids: examData.question_ids,
@@ -1388,6 +1405,22 @@ export default function TeacherAppPage() {
 
     setExams((prev) =>
       prev.map((e) => (e.id === examId ? { ...e, results_released: nextState } : e))
+    )
+  }
+
+  const handleUpdateExamLanguage = async (examId: string, language: 'ar' | 'en') => {
+    const supabase = createClient()
+    const { error } = await supabase.from('exams').update({ language }).eq('id', examId)
+    if (error) {
+      console.error('[ExamLanguage] Error updating exam language:', error)
+      if (error.code === '42703' || error.message?.includes('language')) {
+        alert('يرجى تشغيل ملف الترقية 0006_add_exam_language.sql في Supabase لحفظ لغة الاختبار في قاعدة البيانات.')
+      }
+      return
+    }
+
+    setExams((prev) =>
+      prev.map((e) => (e.id === examId ? { ...e, language } : e))
     )
   }
 
@@ -1459,21 +1492,33 @@ export default function TeacherAppPage() {
 
         const newTitle = data.title || `${origExam.title} (إعادة)`
 
-        const { data: newExam, error: insertErr } = await supabase
+        const clonePayload = {
+          teacher_id: user.id,
+          title: newTitle,
+          group_id: origExam.group_id,
+          grade: origExam.grade,
+          duration_min: Math.max(1, Number(data.duration_min) || origExam.duration_min || 30),
+          opens_at: data.opens_at ? new Date(data.opens_at).toISOString() : null,
+          closes_at: data.closes_at ? new Date(data.closes_at).toISOString() : null,
+          shuffle: origExam.shuffle,
+          results_released: false,
+        }
+
+        let { data: newExam, error: insertErr } = await supabase
           .from('exams')
-          .insert({
-            teacher_id: user.id,
-            title: newTitle,
-            group_id: origExam.group_id,
-            grade: origExam.grade,
-            duration_min: Math.max(1, Number(data.duration_min) || origExam.duration_min || 30),
-            opens_at: data.opens_at ? new Date(data.opens_at).toISOString() : null,
-            closes_at: data.closes_at ? new Date(data.closes_at).toISOString() : null,
-            shuffle: origExam.shuffle,
-            results_released: false,
-          })
+          .insert({ ...clonePayload, language: origExam.language === 'en' ? 'en' : 'ar' })
           .select()
           .single()
+
+        if (insertErr && (insertErr.code === '42703' || insertErr.message?.includes('language'))) {
+          const retry = await supabase
+            .from('exams')
+            .insert(clonePayload)
+            .select()
+            .single()
+          newExam = retry.data
+          insertErr = retry.error
+        }
 
         if (insertErr || !newExam) {
           console.error('[RepublishExam] Error cloning exam:', insertErr)
@@ -1921,6 +1966,7 @@ export default function TeacherAppPage() {
               teacherName={teacherProfile.full_name}
               onCreateExam={handleCreateExam}
               onToggleResultsRelease={handleToggleResultsRelease}
+              onUpdateExamLanguage={handleUpdateExamLanguage}
               onDeleteExam={handleDeleteExam}
               onRepublishExam={handleRepublishExam}
               onFetchExamSubmissions={handleFetchExamSubmissions}

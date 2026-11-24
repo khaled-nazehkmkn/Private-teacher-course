@@ -290,6 +290,7 @@ export interface Database {
           opens_at: string | null
           closes_at: string | null
           shuffle: boolean
+          language: 'ar' | 'en'
           results_released: boolean
           public_token: string
           created_at: string
@@ -304,6 +305,7 @@ export interface Database {
           opens_at?: string | null
           closes_at?: string | null
           shuffle?: boolean
+          language?: 'ar' | 'en'
           results_released?: boolean
           public_token?: string
           created_at?: string
@@ -318,6 +320,7 @@ export interface Database {
           opens_at?: string | null
           closes_at?: string | null
           shuffle?: boolean
+          language?: 'ar' | 'en'
           results_released?: boolean
           public_token?: string
           created_at?: string

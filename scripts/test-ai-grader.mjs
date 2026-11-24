@@ -16,6 +16,13 @@ import {
   containsProseWords,
 } from '../components/ui/math-renderer.js'
 import { parseJsonQuestions } from '../lib/question-parser.js'
+import {
+  formatQuestionLabel,
+  getOptionLetters,
+  formatMarksBadge,
+  normalizeExamLanguage,
+  toArabicIndicDigits,
+} from '../lib/exam-language.js'
 import fs from 'node:fs'
 
 let totalTests = 0
@@ -366,6 +373,36 @@ async function runTests() {
     const parseResult = parseJsonQuestions(jsonMatch[0])
     assert(parseResult.errors.length === 0, `parseJsonQuestions parses AI prompt JSON with 0 errors (errors: ${parseResult.errors.join(', ')})`)
     assert(parseResult.questions.length === templateData.questions.length, `parseJsonQuestions successfully parsed all ${templateData.questions.length} questions`)
+  }
+
+  // ----------------------------------------------------------------
+  // Test Suite 7: Exam Language Formatting (Arabic س١ vs English Q1)
+  // ----------------------------------------------------------------
+  console.log('\nTest Suite 7: Exam Language Formatting (Arabic س١ vs English Q1)')
+  {
+    assert(normalizeExamLanguage('en') === 'en', 'Normalizes "en" to "en"')
+    assert(normalizeExamLanguage('ar') === 'ar', 'Normalizes "ar" to "ar"')
+    assert(normalizeExamLanguage(null) === 'ar', 'Defaults null/missing language to "ar"')
+
+    assert(toArabicIndicDigits(1) === '١', 'Converts 1 to Arabic-Indic digit ١')
+    assert(toArabicIndicDigits(12) === '١٢', 'Converts 12 to Arabic-Indic digits ١٢')
+
+    assert(formatQuestionLabel(0, 'ar') === 'س١', 'Arabic Q1 label is س١')
+    assert(formatQuestionLabel(1, 'ar') === 'س٢', 'Arabic Q2 label is س٢')
+    assert(formatQuestionLabel(9, 'ar') === 'س١٠', 'Arabic Q10 label is س١٠')
+
+    assert(formatQuestionLabel(0, 'en') === 'Q1', 'English Q1 label is Q1')
+    assert(formatQuestionLabel(9, 'en') === 'Q10', 'English Q10 label is Q10')
+
+    const arOpts = getOptionLetters('ar')
+    const enOpts = getOptionLetters('en')
+    assert(arOpts[0] === 'أ' && arOpts[1] === 'ب' && arOpts[2] === 'ج' && arOpts[3] === 'د', 'Arabic options are أ، ب، ج، د')
+    assert(enOpts[0] === 'A' && enOpts[1] === 'B' && enOpts[2] === 'C' && enOpts[3] === 'D', 'English options are A, B, C, D')
+
+    assert(formatMarksBadge(1, 'ar') === '(١ درجة)', 'Arabic 1 mark badge is (١ درجة)')
+    assert(formatMarksBadge(3, 'ar') === '(٣ درجات)', 'Arabic 3 marks badge is (٣ درجات)')
+    assert(formatMarksBadge(1, 'en') === '(1 mark)', 'English 1 mark badge is (1 mark)')
+    assert(formatMarksBadge(3, 'en') === '(3 marks)', 'English 3 marks badge is (3 marks)')
   }
 
   console.log('\n====================================================')
