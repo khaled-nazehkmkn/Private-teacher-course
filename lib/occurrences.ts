@@ -18,6 +18,17 @@ export interface WeeklySession {
   end_time: string
 }
 
+/**
+ * Format a Date to local Egyptian/browser calendar YYYY-MM-DD
+ * avoiding UTC timezone shifts around midnight.
+ */
+export function formatLocalDate(date: Date = new Date()): string {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
 export function generateOccurrencesForWeeks({
   weeklySessions,
   weeksAhead = 8,
@@ -54,7 +65,7 @@ export function generateOccurrencesForWeeks({
     const dayOfWeek = current.getDay() // 0 = Sunday, 6 = Saturday
     const matchingSessions = weeklySessions.filter((s) => s.weekday === dayOfWeek)
 
-    const dateStr = current.toISOString().split('T')[0]
+    const dateStr = formatLocalDate(current)
 
     for (const session of matchingSessions) {
       occurrences.push({

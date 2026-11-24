@@ -259,6 +259,17 @@ async function runTests() {
 
     // 7. cleanGeminiArtifacts integration
     assert(cleanGeminiArtifacts('X² - 4X + 4') === '$X^2 - 4X + 4$', 'cleanGeminiArtifacts handles raw powers and unicode')
+
+    // 8. English sentences with powers or ordinals (e.g. 4^{th}) - must NOT wrap whole sentence in $!
+    const engQuestion = 'In a geometric sequence, the sum of the 4^{th} and 6^{th} terms is 120 and the sum of the 5^{th} and 7^{th} terms = 240, then the sum of first 10 terms = .........'
+    const cleanedEng = cleanGeminiArtifacts(engQuestion)
+    assert(cleanedEng.startsWith('In a geometric sequence, the sum of the $4^{th}$'), 'English question text remains normal readable font with only powers wrapped')
+    assert(!cleanedEng.startsWith('$In a geometric sequence'), 'English question is never wrapped as a whole in $')
+
+    // 9. Accidentally wrapped English sentence in $...$ must be unwrapped to normal text font
+    const wrappedEng = '$' + engQuestion + '$'
+    const unwrappedResult = cleanGeminiArtifacts(wrappedEng)
+    assert(unwrappedResult.startsWith('In a geometric sequence, the sum of the $4^{th}$'), 'Accidentally wrapped English sentence is unwrapped so font matches standard text')
   }
 
   console.log('\n====================================================')

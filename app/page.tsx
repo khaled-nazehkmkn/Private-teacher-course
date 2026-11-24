@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/browser'
 import { evaluateTeacherStatus, type TeacherStatus } from '@/lib/teacher-status'
-import { generateOccurrencesForWeeks } from '@/lib/occurrences'
+import { generateOccurrencesForWeeks, formatLocalDate } from '@/lib/occurrences'
 import { normalizeArabicDigits } from '@/lib/access-code'
 
 // UI Components
@@ -305,9 +305,7 @@ export default function TeacherAppPage() {
           }
         }
 
-        if (occData && occData.length > 0) {
-          setOccurrences(occData as OccurrenceItem[])
-        }
+        setOccurrences((occData || []) as OccurrenceItem[])
 
         // Fetch Questions
         const { data: qData } = await supabase
@@ -540,6 +538,7 @@ export default function TeacherAppPage() {
     const supabase = createClient()
     await supabase.from('groups').delete().eq('id', groupId)
     setGroups((prev) => prev.filter((g) => g.id !== groupId))
+    setOccurrences((prev) => prev.filter((o) => o.group_id !== groupId))
   }
 
   const handleUpdateGroup = async (
@@ -567,6 +566,13 @@ export default function TeacherAppPage() {
         .eq('id', groupId)
 
       await supabase.from('group_sessions').delete().eq('group_id', groupId)
+
+      // Clean up future occurrences for this group before repopulating
+      await supabase
+        .from('session_occurrences')
+        .delete()
+        .eq('group_id', groupId)
+        .gte('session_date', formatLocalDate(new Date()))
 
       if (updatedData.sessions.length > 0) {
         await supabase.from('group_sessions').insert(

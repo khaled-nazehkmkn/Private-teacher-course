@@ -21,6 +21,37 @@ export const UNICODE_SUPERSCRIPTS_MAP: Record<string, string> = {
 }
 
 /**
+ * Standard mathematical command or function names
+ */
+const MATH_IDENTIFIERS = new Set([
+  'sin', 'cos', 'tan', 'cot', 'sec', 'csc',
+  'arcsin', 'arccos', 'arctan', 'sinh', 'cosh', 'tanh',
+  'log', 'ln', 'lg', 'exp', 'det', 'lim',
+  'gcd', 'deg', 'sqrt', 'cbrt', 'max', 'min',
+  'mod', 'abs', 'pi', 'dx', 'dy', 'dt', 'dz',
+  'theta', 'alpha', 'beta', 'gamma', 'delta', 'epsilon',
+  'zeta', 'eta', 'iota', 'kappa', 'lambda', 'mu', 'nu',
+  'xi', 'rho', 'sigma', 'tau', 'upsilon', 'phi', 'chi',
+  'psi', 'omega', 'frac', 'sum', 'prod', 'int',
+  'text', 'mathrm', 'mathbf', 'mathit', 'mathbb', 'mathcal',
+  'th', 'st', 'nd', 'rd',
+])
+
+/**
+ * Detects whether a string or segment contains natural language prose words
+ * (English or Arabic) rather than a pure standalone math formula.
+ */
+export function containsProseWords(str: string): boolean {
+  if (!str) return false
+  if (/[\u0600-\u06FF]/.test(str)) return true
+
+  const words = str.match(/\b[A-Za-z]{2,}\b/g)
+  if (!words) return false
+
+  return words.some((w) => !MATH_IDENTIFIERS.has(w.toLowerCase()))
+}
+
+/**
  * Normalizes unwrapped mathematical powers and unicode superscripts (e.g. x^2, x², 10⁻³, (x-2)^2)
  * so they are rendered as proper KaTeX math formulas rather than broken text.
  */
@@ -47,19 +78,19 @@ export function normalizeRawPowers(raw: string): string {
   )
 
   // 3. If an entire string (e.g. an MCQ option like "X^2 - 4X + 4" or "x^2") is a math expression with powers
-  // and has no $ delimiters, wrap the entire string in $...$
+  // and has no $ delimiters, wrap the entire string in $...$ ONLY IF it is not natural language prose!
   const trimmed = text.trim()
   if (!trimmed.includes('$') && trimmed.includes('^')) {
-    // If it contains NO Arabic letters and is made of standard math tokens
+    // If it contains NO prose words and is made of standard math tokens
     if (
-      !/[\u0600-\u06FF]/.test(trimmed) &&
+      !containsProseWords(trimmed) &&
       /^[-+*/=()<>[\]|&%:;,?!'"`a-zA-Z0-9\s._^{}\\√±≤≥≠]+$/.test(trimmed)
     ) {
       return `$${trimmed}$`
     }
   }
 
-  // 4. For mixed text (e.g. Arabic questions with unwrapped powers like "إذا كان المقدار x^2 - 4 يساوي..."):
+  // 4. For mixed text (e.g. Arabic/English questions with unwrapped powers like "x^2 - 4" or "4^{th}"):
   // Split by existing math blocks ($$...$$, $...$, \(...\), \[...\])
   const mathBlockRegex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\$[^\$\n]+?\$|\\\(.*?\\\))/g
   const parts = text.split(mathBlockRegex)
@@ -69,7 +100,7 @@ export function normalizeRawPowers(raw: string): string {
     if (!segment || !segment.includes('^')) continue
 
     // Wrap bare power expressions or equations with powers:
-    // e.g. (X - 2)^2, x^2 - 4x + 4, x^2 = 25, 2^3, 10^{-3}
+    // e.g. (X - 2)^2, x^2 - 4x + 4, x^2 = 25, 2^3, 10^{-3}, 4^{th}
     segment = segment.replace(
       /(?<![$\w\\/])((?:\([A-Za-z0-9+\-*/.\s]+\)|[A-Za-z0-9]+)\^(?:\{[^{}]+\}|-?[A-Za-z0-9]+)(?:\s*[-+*/=<>≤≥≠]\s*(?:(?:\([A-Za-z0-9+\-*/.\s]+\)|[A-Za-z0-9]+)(?:\^(?:\{[^{}]+\}|-?[A-Za-z0-9]+))?|[A-Za-z0-9]+(?:\.[0-9]+)?))*)(?![$\w^])/g,
       (match) => `$${match.trim()}$`
@@ -79,6 +110,39 @@ export function normalizeRawPowers(raw: string): string {
   }
 
   return parts.join('')
+}
+
+/**
+ * If a LaTeX math block ($...$, $$...$$, \(...\)) mistakenly wraps natural language prose
+ * (Arabic or English sentences) without \text{}, unwrap the prose so it renders in standard
+ * readable font (like normal questions), keeping only actual mathematical formulas wrapped in $...$.
+ */
+export function unwrapProseMath(text: string): string {
+  if (!text || (!text.includes('$') && !text.includes('\\(') && !text.includes('\\['))) {
+    return text
+  }
+
+  const mathBlockRegex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\$[^\$\n]+?\$|\\\(.*?\\\))/g
+  return text.replace(mathBlockRegex, (match) => {
+    let content = match
+    if (match.startsWith('$$') && match.endsWith('$$')) content = match.slice(2, -2)
+    else if (match.startsWith('\\[') && match.endsWith('\\]')) content = match.slice(2, -2)
+    else if (match.startsWith('$') && match.endsWith('$')) content = match.slice(1, -1)
+    else if (match.startsWith('\\(') && match.endsWith('\\)')) content = match.slice(2, -2)
+
+    // If it intentionally uses \text{} or \mathrm{}, keep as is
+    if (/\\(?:text|mathrm|mathbf|mathit)\s*\{/.test(content)) {
+      return match
+    }
+
+    // If it contains natural prose words, unwrap the prose and normalize embedded powers
+    if (containsProseWords(content)) {
+      const unwrapped = content.trim()
+      return normalizeRawPowers(unwrapped)
+    }
+
+    return match
+  })
 }
 
 /**
@@ -107,7 +171,10 @@ export function cleanGeminiArtifacts(raw: string): string {
     text = '-' + text.replace(/[-−]/, '').trim()
   }
 
-  // Normalize raw powers and unicode superscripts to proper KaTeX math
+  // 1. Unwrap any accidentally wrapped prose sentences so they use the standard clean UI font
+  text = unwrapProseMath(text)
+
+  // 2. Normalize raw powers and unicode superscripts to proper KaTeX math
   text = normalizeRawPowers(text)
 
   return text
@@ -340,6 +407,15 @@ export function MathRenderer({
     const result: Segment[] = []
 
     const renderKatexSegment = (rawMath: string, isBlock: boolean): Segment => {
+      // Safety net: If math block contains prose words without \text{}, render as standard text
+      // to guarantee readable font with normal spacing (never cramped italic math font)
+      if (containsProseWords(rawMath) && !/\\(?:text|mathrm|mathbf|mathit)\s*\{/.test(rawMath)) {
+        return {
+          type: 'text',
+          value: rawMath,
+        }
+      }
+
       const normalizedMath = normalizeLatexMathContent(rawMath.trim())
       try {
         const html = katex.renderToString(normalizedMath, {

@@ -14,7 +14,7 @@ import {
   MessageCircle,
   Plus,
 } from 'lucide-react'
-import { formatArabicDate } from '@/lib/occurrences'
+import { formatArabicDate, formatLocalDate } from '@/lib/occurrences'
 import type { GroupItem } from '../groups/GroupsView'
 import type { StudentItem } from '../students/StudentsView'
 import type { OccurrenceItem } from '../attendance/AttendanceView'
@@ -45,8 +45,73 @@ export function DashboardView({
   exams,
   onNavigateTab,
 }: Props) {
-  const todayStr = new Date().toISOString().split('T')[0]
-  const todaySessions = occurrences.filter((o) => o.session_date === todayStr)
+  // Safe local calendar date for Cairo/browser
+  const today = React.useMemo(() => new Date(), [])
+  const todayDateStr = React.useMemo(() => formatLocalDate(today), [today])
+  const todayWeekday = React.useMemo(() => today.getDay(), [today]) // 0 = Sunday, 6 = Saturday
+
+  // Unified, dynamic calculation of Today's Lessons matching AttendanceView exactly:
+  // Combines active groups scheduled for today + any explicit non-cancelled occurrences today.
+  // Guarantees no phantom / cancelled / obsolete occurrences inflate the count.
+  const todayLessons = React.useMemo(() => {
+    const list: Array<{
+      id: string
+      groupId: string
+      groupName: string
+      grade: string
+      studentCount: number
+      startTime: string
+      endTime: string
+      isOccurrenceCreated: boolean
+      occurrenceId?: string
+      status: 'held' | 'cancelled'
+    }> = []
+
+    groups.forEach((grp) => {
+      const matchingSessions = (grp.sessions || []).filter((s) => s.weekday === todayWeekday)
+      const existingOcc = occurrences.find(
+        (o) => o.group_id === grp.id && o.session_date === todayDateStr
+      )
+
+      // Exclude if explicitly cancelled
+      if (existingOcc?.status === 'cancelled') {
+        return
+      }
+
+      if (matchingSessions.length > 0) {
+        matchingSessions.forEach((sess, sIdx) => {
+          list.push({
+            id: existingOcc?.id || `sched-${grp.id}-${sIdx}`,
+            groupId: grp.id,
+            groupName: grp.name,
+            grade: grp.grade,
+            studentCount: grp.studentCount || 0,
+            startTime: (existingOcc?.start_time || sess.start_time).slice(0, 5),
+            endTime: (existingOcc?.end_time || sess.end_time).slice(0, 5),
+            isOccurrenceCreated: Boolean(existingOcc),
+            occurrenceId: existingOcc?.id,
+            status: 'held',
+          })
+        })
+      } else if (existingOcc && existingOcc.status !== 'cancelled') {
+        // Extra lesson scheduled for today for this group
+        list.push({
+          id: existingOcc.id,
+          groupId: grp.id,
+          groupName: grp.name,
+          grade: grp.grade,
+          studentCount: grp.studentCount || 0,
+          startTime: existingOcc.start_time.slice(0, 5),
+          endTime: existingOcc.end_time.slice(0, 5),
+          isOccurrenceCreated: true,
+          occurrenceId: existingOcc.id,
+          status: 'held',
+        })
+      }
+    })
+
+    return list
+  }, [groups, occurrences, todayDateStr, todayWeekday])
 
   // Students with absence alerts (>= 3 absences or >= 2 consecutive)
   const studentsWithAlerts = students
@@ -114,14 +179,14 @@ export function DashboardView({
           <div className="flex items-center justify-between">
             <div>
               <p className="text-[11px] sm:text-xs font-bold text-slate-400">حصص اليوم</p>
-              <p className="mt-1 text-2xl sm:text-3xl font-black text-slate-800">{todaySessions.length}</p>
+              <p className="mt-1 text-2xl sm:text-3xl font-black text-slate-800">{todayLessons.length}</p>
             </div>
             <div className="grid size-9 sm:size-12 place-items-center rounded-2xl bg-amber-50 text-amber-600">
               <CalendarDays className="size-4 sm:size-6" />
             </div>
           </div>
           <p className="mt-2 text-[10px] sm:text-xs text-slate-400">
-            {todaySessions.length > 0 ? 'مجدولة اليوم' : 'لا حصص اليوم'}
+            {todayLessons.length > 0 ? `${todayLessons.length} حصة مجدولة اليوم` : 'لا حصص اليوم'}
           </p>
         </div>
 
@@ -171,30 +236,39 @@ export function DashboardView({
           </div>
 
           <div className="mt-4 space-y-3">
-            {todaySessions.map((occ) => {
-              const grp = groups.find((g) => g.id === occ.group_id)
+            {todayLessons.map((lesson) => {
               return (
                 <div
-                  key={occ.id}
-                  className="flex items-center justify-between rounded-xl border border-slate-100 bg-slate-50/60 p-3.5"
+                  key={lesson.id}
+                  className="flex items-center justify-between rounded-xl border border-slate-100 bg-slate-50/60 p-3.5 transition hover:bg-slate-50"
                 >
                   <div>
-                    <h4 className="text-xs font-bold text-slate-800">{grp?.name}</h4>
+                    <h4 className="text-xs font-bold text-slate-800">{lesson.groupName}</h4>
                     <p className="text-[11px] text-slate-400">
-                      {grp?.grade} · سعة: {grp?.studentCount || 0} طالب
+                      {lesson.grade} · سعة: {lesson.studentCount} طالب
                     </p>
                   </div>
-                  <div className="flex items-center gap-1 font-mono text-xs font-bold text-slate-600" dir="ltr">
-                    <Clock className="size-3 text-slate-400" />
-                    <span>
-                      {occ.start_time} - {occ.end_time}
-                    </span>
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1 font-mono text-xs font-bold text-slate-600" dir="ltr">
+                      <Clock className="size-3 text-slate-400" />
+                      <span>
+                        {lesson.startTime} - {lesson.endTime}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => onNavigateTab('الحضور والغياب')}
+                      className="rounded-lg bg-blue-50 px-2 py-1 text-[11px] font-bold text-[#1d5ca8] hover:bg-blue-100 transition"
+                      title="تسجيل حضور هذه الحصة"
+                    >
+                      رصد
+                    </button>
                   </div>
                 </div>
               )
             })}
 
-            {todaySessions.length === 0 && (
+            {todayLessons.length === 0 && (
               <div className="py-8 text-center text-xs text-slate-400">
                 لا توجد حصص مجدولة لهذا اليوم
               </div>
